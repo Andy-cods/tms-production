@@ -1,0 +1,734 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model SlaConfig {
+  id           String    @id @default(cuid())
+  name         String
+  targetEntity String
+  priority     Priority?
+  category     String?
+  targetHours  Float
+  description  String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([targetEntity, priority, category])
+  @@map("sla_configs")
+}
+
+model User {
+  id                    String               @id @default(uuid())
+  email                 String               @unique
+  name                  String
+  password              String
+  role                  Role                 @default(STAFF)
+  teamId                String?
+  isActive              Boolean              @default(true)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  absenceReason         String?
+  absenceUntil          DateTime?
+  delegateTo            String?
+  isAbsent              Boolean              @default(false)
+  performanceScore      Float                @default(1.0)
+  wipLimit              Int                  @default(5)
+  positionId            String?
+  positionText          String?              // Vị trí tự do (text field)
+  phone                 String?
+  telegramUsername      String?
+  permissionTickets     String[]            @default([])
+  notificationSettings  NotificationSetting?
+  timeLogs              TimeLog[]
+  attachmentsUploaded   Attachment[]
+  auditLogs             AuditLog[]
+  commentsCreated       Comment[]
+  escalationsReceived   EscalationLog[]      @relation("EscalatedTo")
+  customEscalationRules EscalationRule[]
+  notifications         Notification[]
+  requestsCreated       Request[]            @relation("RequestCreator")
+  requestsAccepted      Request[]            @relation("RequestAcceptedBy")
+  slaPauseLogs          SLAPauseLog[]
+  createdTemplates      TaskTemplate[]
+  tasksAssigned         Task[]               @relation("TaskAssignee")
+  achievements          UserAchievement[]
+  stats                 UserStats?
+  delegate              User?                @relation("Delegation", fields: [delegateTo], references: [id])
+  delegatedFrom         User[]               @relation("Delegation")
+  position              Position?            @relation(fields: [positionId], references: [id])
+  team                  Team?                @relation(fields: [teamId], references: [id])
+  workloadSnapshots     WorkloadSnapshot[]
+
+  @@index([positionId])
+  @@map("users")
+}
+
+model Team {
+  id               String            @id @default(uuid())
+  name             String            @unique
+  description      String?
+  leaderId         String?
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  wipLimit         Int               @default(20)
+  categories       Category[]
+  dashboardMetrics DashboardMetric[]
+  requests         Request[]
+  members          User[]
+
+  @@map("teams")
+}
+
+model Category {
+  id                String         @id @default(uuid())
+  name              String         @unique
+  description       String?
+  teamId            String?
+  estimatedDuration Int?
+  isActive          Boolean        @default(true)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  icon              String?
+  standardDuration  Int?
+  team              Team?          @relation(fields: [teamId], references: [id])
+  requests          Request[]
+  templates         TaskTemplate[]
+
+  @@index([teamId])
+  @@map("categories")
+}
+
+model Request {
+  id                String          @id @default(uuid())
+  title             String
+  description       String
+  categoryId        String?
+  priority          Priority        @default(MEDIUM)
+  status            RequestStatus   @default(OPEN)
+  creatorId         String
+  teamId            String?
+  deadline          DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  completedAt       DateTime?
+  isUrgent          Boolean         @default(false)
+  tags              String[]        @default([])
+  calculatedScore   Float?
+  customScores      Json?
+  impactScore       Int?            @db.SmallInt
+  priorityReason    String?
+  requesterType     RequesterType   @default(INTERNAL)
+  riskScore         Int?            @db.SmallInt
+  slaDeadline       DateTime?
+  slaPausedAt       DateTime?
+  slaPausedDuration Int             @default(0)
+  slaStartedAt      DateTime?
+  slaStatus         String?
+  urgencyScore      Int?            @db.SmallInt
+  createdFromTemplateId String?
+  acceptedAt        DateTime?
+  acceptedBy        String?
+  acceptedByUser    User?           @relation("RequestAcceptedBy", fields: [acceptedBy], references: [id])
+  attachments       Attachment[]
+  auditLogs         AuditLog[]
+  comments          Comment[]
+  escalationLogs    EscalationLog[]
+  category          Category?       @relation(fields: [categoryId], references: [id])
+  creator           User            @relation("RequestCreator", fields: [creatorId], references: [id])
+  team              Team?           @relation(fields: [teamId], references: [id])
+  template          TaskTemplate?   @relation(fields: [createdFromTemplateId], references: [id])
+  tasks             Task[]
+
+  @@index([status, priority, createdAt])
+  @@index([creatorId])
+  @@index([teamId])
+  @@index([acceptedBy])
+  @@map("requests")
+}
+
+model Task {
+  id                       String              @id @default(uuid())
+  requestId                String
+  title                    String
+  description              String?
+  assigneeId               String?
+  status                   TaskStatus          @default(TODO)
+  deadline                 DateTime?
+  startedAt                DateTime?
+  completedAt              DateTime?
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  confirmationDeadline     DateTime?
+  confirmedAt              DateTime?
+  createdFromTemplateId    String?
+  parentTaskId             String?
+  slaDeadline              DateTime?
+  slaPausedAt              DateTime?
+  slaPausedReason          String?
+  slaStartedAt             DateTime?
+  slaStatus                String?
+  slaTotalPaused           Int                 @default(0)
+  totalTimeSpent           Int                 @default(0)
+  productLink              String?
+  productLinkReviewComment String?
+  productLinkReviewStatus  String?
+  productLinkReviewedAt    DateTime?
+  productLinkReviewedBy    String?
+  productLinkSubmittedAt   DateTime?
+  productLinkSubmittedBy   String?
+  productLinkRejectionCount Int                 @default(0)
+  estimate                 TaskEstimate?
+  timeLogs                 TimeLog[]
+  attachments              Attachment[]
+  auditLogs                AuditLog[]
+  comments                 Comment[]
+  escalationLogs           EscalationLog[]
+  slaPauseLogs             SLAPauseLog[]
+  checklistItems           TaskChecklistItem[]
+  assignee                 User?               @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  parentTask               Task?               @relation("TaskHierarchy", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks                 Task[]              @relation("TaskHierarchy")
+  request                  Request             @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([assigneeId, status])
+  @@index([parentTaskId])
+  @@index([productLinkReviewStatus])
+  @@map("tasks")
+}
+
+model Attachment {
+  id           String       @id @default(cuid())
+  requestId    String?
+  taskId       String?
+  fileName     String
+  fileUrl      String?
+  fileSize     Int
+  createdAt    DateTime     @default(now())
+  driveLink    String?
+  externalUrl  String?
+  mimeType     String
+  replacesId   String?
+  scanDetails  Json?
+  scanScore    Int?
+  scanStatus   ScanStatus   @default(PENDING)
+  scannedAt    DateTime?
+  updatedAt    DateTime     @updatedAt
+  uploadMethod UploadMethod @default(FILE)
+  uploadedById String
+  version      Int          @default(1)
+  replaces     Attachment?  @relation("FileVersions", fields: [replacesId], references: [id])
+  replacedBy   Attachment[] @relation("FileVersions")
+  request      Request?     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  task         Task?        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy   User         @relation(fields: [uploadedById], references: [id])
+
+  @@index([requestId])
+  @@index([taskId])
+  @@index([uploadedById])
+  @@index([scanStatus])
+  @@map("attachments")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  requestId String?
+  taskId    String?
+  content   String
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  author    User     @relation(fields: [authorId], references: [id])
+  request   Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([taskId])
+  @@map("comments")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String
+  entity    String
+  entityId  String
+  oldValue  Json?
+  newValue  Json?
+  createdAt DateTime @default(now())
+  requestId String?
+  taskId    String?
+  request   Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String               @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  requestId String?
+  taskId    String?
+  isRead    Boolean              @default(false)
+  readAt    DateTime?
+  createdAt DateTime             @default(now())
+  link      String?
+  metadata  Json?
+  priority  NotificationPriority @default(INFO)
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model NotificationSetting {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  emailEnabled     Boolean  @default(true)
+  emailDailyDigest Boolean  @default(true)
+  emailUrgentOnly  Boolean  @default(false)
+  digestTime       String   @default("08:00")
+  inAppEnabled     Boolean  @default(true)
+  soundEnabled     Boolean  @default(true)
+  dndEnabled       Boolean  @default(false)
+  dndStartTime     String?
+  dndEndTime       String?
+  dndDays          Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PriorityConfig {
+  id        String   @id @default(cuid())
+  question  String
+  weight    Float    @default(1.0)
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("priority_configs")
+}
+
+model PriorityThreshold {
+  id        String   @id @default(cuid())
+  minScore  Float
+  maxScore  Float
+  priority  Priority
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("priority_thresholds")
+}
+
+model DashboardMetric {
+  id            String   @id @default(cuid())
+  metricType    String
+  value         Float
+  previousValue Float?
+  change        Float?
+  period        String
+  teamId        String?
+  calculatedAt  DateTime @default(now())
+  metadata      Json?
+  team          Team?    @relation(fields: [teamId], references: [id])
+
+  @@index([metricType, period, teamId, calculatedAt])
+  @@index([calculatedAt])
+  @@map("dashboard_metrics")
+}
+
+model TimeLog {
+  id         String    @id @default(cuid())
+  taskId     String
+  userId     String
+  startTime  DateTime
+  endTime    DateTime?
+  duration   Int?
+  isRunning  Boolean   @default(false)
+  isPaused   Boolean   @default(false)
+  pausedAt   DateTime?
+  notes      String?
+  isBillable Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  task       Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, userId])
+  @@index([userId, startTime])
+  @@index([isRunning])
+}
+
+model TaskEstimate {
+  id               String   @id @default(cuid())
+  taskId           String   @unique
+  estimatedMinutes Int
+  actualMinutes    Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  task             Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model VirusScanConfig {
+  id               String   @id @default(cuid())
+  name             String   @unique @default("default")
+  safetyThreshold  Int      @default(80)
+  allowedMimeTypes String[]
+  maxFileSize      Int      @default(20971520)
+  scanTimeout      Int      @default(30)
+  cacheResults     Boolean  @default(true)
+  cacheDuration    Int      @default(86400)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("virus_scan_configs")
+}
+
+model WorkloadSnapshot {
+  id              String   @id @default(cuid())
+  userId          String
+  activeTaskCount Int
+  pendingCount    Int
+  avgLeadTime     Float?
+  utilizationRate Float
+  calculatedAt    DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, calculatedAt])
+  @@map("workload_snapshots")
+}
+
+model AssignmentConfig {
+  id               String   @id @default(cuid())
+  name             String   @unique @default("default")
+  weightWorkload   Float    @default(0.4)
+  weightSkill      Float    @default(0.3)
+  weightSLA        Float    @default(0.2)
+  weightRandom     Float    @default(0.1)
+  prioritizeExactMatch        Boolean @default(true)
+  allowPartialMatch           Boolean @default(true)
+  fallbackStrategy            String  @default("smart_balance")
+  skillMatchingMode           String  @default("balanced")
+  maxAssignmentsPerUserPerDay Int     @default(0)
+  cooldownMinutes             Int     @default(0)
+  slaGracePercent             Int     @default(15)
+  backlogAgingBoost           Float   @default(0)
+  advancedSettings            Json?
+  enableAutoAssign Boolean  @default(true)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("assignment_configs")
+}
+
+model SLAPauseLog {
+  id        String    @id @default(cuid())
+  taskId    String
+  reason    String
+  pausedAt  DateTime
+  resumedAt DateTime?
+  duration  Int?
+  pausedBy  String
+  notes     String?
+  user      User      @relation(fields: [pausedBy], references: [id])
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, pausedAt])
+  @@map("sla_pause_logs")
+}
+
+model ReminderConfig {
+  id               String   @id @default(cuid())
+  name             String   @unique @default("default")
+  firstReminder    Int      @default(60)
+  secondReminder   Int      @default(120)
+  thirdReminder    Int      @default(180)
+  enableReminders  Boolean  @default(true)
+  reminderChannels String[] @default(["TELEGRAM", "EMAIL"])
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("reminder_configs")
+}
+
+model EscalationRule {
+  id                   String          @id @default(cuid())
+  name                 String          @unique
+  triggerType          String
+  thresholdHours       Int
+  escalateTo           String
+  customRecipientId    String?
+  notificationChannels String[]        @default(["TELEGRAM", "EMAIL"])
+  isActive             Boolean         @default(true)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  escalationLogs       EscalationLog[]
+  customRecipient      User?           @relation(fields: [customRecipientId], references: [id])
+
+  @@map("escalation_rules")
+}
+
+model EscalationLog {
+  id          String         @id @default(cuid())
+  requestId   String?
+  taskId      String?
+  ruleId      String
+  reason      String
+  escalatedTo String
+  status      String
+  createdAt   DateTime       @default(now())
+  resolvedAt  DateTime?
+  recipient   User           @relation("EscalatedTo", fields: [escalatedTo], references: [id])
+  request     Request?       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  rule        EscalationRule @relation(fields: [ruleId], references: [id])
+  task        Task?          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+  @@index([taskId, createdAt])
+  @@index([escalatedTo, status])
+  @@map("escalation_logs")
+}
+
+model UserStats {
+  id                      String    @id @default(cuid())
+  userId                  String    @unique
+  currentStreak           Int       @default(0)
+  longestStreak           Int       @default(0)
+  lastCompletionDate      DateTime?
+  totalTasksCompleted     Int       @default(0)
+  onTimeCompletions       Int       @default(0)
+  lateCompletions         Int       @default(0)
+  avgCompletionDays       Float     @default(0)
+  slaCompliantCount       Int       @default(0)
+  slaViolationCount       Int       @default(0)
+  totalTimeTrackedSeconds Int       @default(0)
+  level                   Int       @default(1)
+  experiencePoints        Int       @default(0)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  petAdoptedAt            DateTime?
+  petExperience           Int       @default(0)
+  petHappiness            Int       @default(100)
+  petLastFed              DateTime?
+  petLevel                Int       @default(1)
+  petName                 String?
+  petType                 String?
+  avatarAccessory         String?
+  avatarBackground        String?   @default("blue")
+  avatarEyes              String?   @default("normal")
+  avatarHair              String?   @default("short")
+  avatarHairColor         String?   @default("black")
+  avatarMouth             String?   @default("smile")
+  avatarSkin              String?   @default("default")
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_stats")
+}
+
+model Achievement {
+  id               String              @id @default(cuid())
+  code             String              @unique
+  name             String
+  description      String
+  icon             String
+  category         AchievementCategory
+  requirement      Int
+  createdAt        DateTime            @default(now())
+  userAchievements UserAchievement[]
+
+  @@index([category])
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime    @default(now())
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+  @@map("user_achievements")
+}
+
+model TaskTemplate {
+  id                 String                  @id @default(cuid())
+  name               String
+  description        String?
+  icon               String                  @default("📝")
+  defaultTitle       String
+  defaultDescription String?
+  defaultPriority    Priority                @default(MEDIUM)
+  defaultCategoryId  String?
+  estimatedDays      Int                     @default(3)
+  isPublic           Boolean                 @default(false)
+  createdById        String
+  usageCount         Int                     @default(0)
+  lastUsedAt         DateTime?
+  variables          Json?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  createdBy          User                    @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  defaultCategory    Category?               @relation(fields: [defaultCategoryId], references: [id])
+  checklistItems     TemplateChecklistItem[]
+  requests           Request[]
+
+  @@index([createdById])
+  @@index([defaultCategoryId])
+  @@index([isPublic])
+  @@map("task_templates")
+}
+
+model TemplateChecklistItem {
+  id             String       @id @default(cuid())
+  templateId     String
+  title          String
+  description    String?
+  order          Int          @default(0)
+  assignToRole   String?
+  estimatedHours Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  template       TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, order])
+  @@map("template_checklist_items")
+}
+
+model TaskChecklistItem {
+  id          String    @id @default(cuid())
+  taskId      String
+  title       String
+  description String?
+  isCompleted Boolean   @default(false)
+  completedAt DateTime?
+  completedBy String?
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, order])
+  @@index([isCompleted])
+  @@map("task_checklist_items")
+}
+
+model Position {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  level       Int?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+
+  @@index([name])
+  @@index([isActive])
+  @@map("positions")
+}
+
+enum Role {
+  STAFF
+  LEADER
+  ADMIN
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum RequestStatus {
+  DRAFT
+  OPEN
+  IN_TRIAGE
+  ASSIGNED
+  IN_PROGRESS
+  IN_REVIEW
+  CLARIFICATION
+  REJECTED
+  DONE
+  ARCHIVED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  IN_REVIEW
+  REWORK
+  DONE
+  WAITING_SUBTASKS
+}
+
+enum NotificationType {
+  REQUEST_CREATED
+  TASK_ASSIGNED
+  TASK_UPDATED
+  REVIEW_NEEDED
+  CLARIFICATION_NEEDED
+  DEADLINE_APPROACHING
+  OVERDUE
+  COMPLETED
+  REQUEST_ARCHIVED
+}
+
+enum NotificationPriority {
+  URGENT
+  WARNING
+  INFO
+}
+
+enum RequesterType {
+  CUSTOMER
+  INTERNAL
+}
+
+enum AchievementCategory {
+  MILESTONE
+  STREAK
+  SPEED
+  QUALITY
+  TIME_MASTER
+  PERFECT_WEEK
+}
+
+enum UploadMethod {
+  FILE
+  DRIVE
+  URL
+}
+
+enum ScanStatus {
+  PENDING
+  SCANNING
+  SAFE
+  UNSAFE
+  ERROR
+  SKIPPED
+}

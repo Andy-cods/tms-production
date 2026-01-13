@@ -1,0 +1,206 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+.turbo
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+!.env.local.example
+
+# vercel
+.vercel
+
+# local database
+postgres_data/
+*.dump
+*.sql.gz
+
+# server credentials
+.server-info
+server-credentials.txt
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+/app/generated/prisma
+
+# ============================================
+# MÔI TRƯỜNG ẢO - KHÔNG COMMIT
+# ============================================
+
+# PM2 (Process Manager)
+.pm2/
+ecosystem.config.js
+pm2.config.js
+*.pm2.log
+
+# Docker volumes và data
+docker-data/
+*.docker-data
+.docker/
+
+# Python virtual environments
+venv/
+env/
+ENV/
+.venv/
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# Node.js version managers
+.nvmrc.local
+.node-version.local
+
+# IDE và editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS files
+Thumbs.db
+.DS_Store
+*.log
+
+# Backup files
+*.bak
+*.backup
+*.tar.gz
+*.zip
+env-backups/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# ============================================
+# SCRIPTS VÀ DOCUMENTATION - KHÔNG COMMIT
+# ============================================
+
+# Deploy/Fix/Check scripts
+deploy-*.sh
+deploy-*.ps1
+fix-*.sh
+fix-*.ps1
+check-*.sh
+check-*.ps1
+backup-*.sh
+restore-*.sh
+setup-*.sh
+seed-*.sh
+sync-*.sh
+upload-*.sh
+debug-*.sh
+rebuild-*.sh
+rollback-*.sh
+verify-*.sh
+force-*.sh
+add-domain.sh
+list-*.sh
+create-*.sh
+*-to-server.sh
+*-to-server.ps1
+
+# Documentation files (giữ lại README.md, CHANGELOG.md, LICENSE.md)
+PROMPT_*.md
+*_GUIDE.md
+*_SUMMARY.md
+*_COMPLETE.md
+*_CHECKLIST.md
+*_IMPLEMENTATION.md
+*_VERIFICATION.md
+*_FIXES.md
+*_FIX.md
+*_SETUP.md
+*_ANALYSIS.md
+*_DEPLOYMENT*.md
+DEPLOY_*.md
+FIX_*.md
+CHECK_*.md
+START_*.md
+QUICK_*.md
+NEXT_STEPS*.md
+CONTINUE_PROMPT*.md
+ALL_PROMPTS*.md
+*_APPLIED.md
+*_QUICK_REF.md
+*_QUICK_START.md
+*_REDESIGN.md
+*_MIGRATION*.md
+*_INTEGRATION*.md
+*_SYSTEM*.md
+*_SERVICE*.md
+*_WORKFLOW*.md
+*_STATUS*.md
+
+# Test outputs
+typecheck-*.txt
+test-output.txt
+test-results.json
+playwright-report/
+test-report/
+
+# Sample/test data files
+employees*.csv
+*-report.csv
+similar-files*.csv
+
+# Text files với commands/notes
+*_COMMANDS.txt
+SSH_SETUP*.txt
+QUICK_PROMPT.txt
+
+# SQL backups (production backups nên ở nơi khác)
+*.sql
+backup-*.sql
+
+# Misc trash
+PrismaClient
+tms-*@*
+copy
+tạo
+tsc
+ma db seed
+
+# Cleanup scripts outputs
+trash-files-list.json
+cleanup-analysis.js
+cleanup-execute.js

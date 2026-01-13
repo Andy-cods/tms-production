@@ -1,0 +1,226 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { signIn } from "next-auth/react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
+
+export function LoginFormNew() {
+  const router = useRouter();
+  const params = useSearchParams();
+  
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [csrfToken, setCsrfToken] = useState<string | null>(null);
+  const [formData, setFormData] = useState({
+    email: "",
+    password: ""
+  });
+
+  // Fetch CSRF token on mount
+  useEffect(() => {
+    const fetchCsrfToken = async () => {
+      try {
+        const response = await fetch("/api/auth/csrf");
+        const data = await response.json();
+        if (data.csrfToken) {
+          setCsrfToken(data.csrfToken);
+        }
+      } catch (err) {
+        console.error("Failed to fetch CSRF token:", err);
+      }
+    };
+    
+    fetchCsrfToken();
+  }, []);
+
+  // Get callbackUrl
+  const rawCallbackUrl = params.get("callbackUrl");
+  let callbackUrl = "/dashboard";
+  
+  if (rawCallbackUrl) {
+    if (rawCallbackUrl.startsWith("/") && !rawCallbackUrl.startsWith("//")) {
+      callbackUrl = rawCallbackUrl;
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      // Ensure we have CSRF token
+      if (!csrfToken) {
+        // Try to fetch again
+        const response = await fetch("/api/auth/csrf");
+        const data = await response.json();
+        if (data.csrfToken) {
+          setCsrfToken(data.csrfToken);
+        } else {
+          setError("Không thể lấy CSRF token. Vui lòng refresh trang và thử lại.");
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Ensure callbackUrl is a valid relative path
+      let safeCallbackUrl = "/dashboard";
+      
+      if (callbackUrl && typeof callbackUrl === "string") {
+        if (callbackUrl.startsWith("/") && !callbackUrl.startsWith("//")) {
+          const cleanPath = callbackUrl.split("?")[0].split("#")[0];
+          if (cleanPath && /^\/[a-zA-Z0-9\/_-]*$/.test(cleanPath)) {
+            safeCallbackUrl = cleanPath;
+          }
+        }
+      }
+      
+      // Sign in with credentials
+      const result = await signIn("credentials", {
+        email: formData.email,
+        password: formData.password,
+        redirect: false,
+        callbackUrl: safeCallbackUrl,
+      });
+
+      if (result?.error) {
+        // Handle specific errors
+        if (result.error.includes("CSRF")) {
+          setError("Lỗi bảo mật. Vui lòng refresh trang và thử lại.");
+          // Refresh CSRF token
+          const response = await fetch("/api/auth/csrf");
+          const data = await response.json();
+          if (data.csrfToken) {
+            setCsrfToken(data.csrfToken);
+          }
+        } else {
+          setError("Email hoặc mật khẩu không đúng");
+        }
+        setLoading(false);
+        return;
+      }
+
+      if (result?.ok) {
+        // Clear any error state
+        setError("");
+        
+        // Force a full page reload to ensure cookies are properly set
+        // This is critical for HTTP connections
+        setTimeout(() => {
+          window.location.href = safeCallbackUrl;
+        }, 300);
+      }
+    } catch (error) {
+      console.error("Login error:", error);
+      setError("Đã xảy ra lỗi. Vui lòng thử lại.");
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-5 relative z-10">
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg text-sm flex items-center gap-2 animate-fade-in shadow-sm">
+          <span className="font-medium">⚠️</span>
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* CSRF Token Status (hidden, for debugging) */}
+      {!csrfToken && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-700 dark:text-yellow-400 px-4 py-3 rounded-lg text-xs">
+          ⏳ Đang tải token bảo mật...
+        </div>
+      )}
+
+      {/* Email Field */}
+      <div className="space-y-2 group">
+        <Label htmlFor="email" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          Email
+        </Label>
+        <div className="relative">
+          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-primary-500 transition-colors duration-200" />
+          <Input
+            id="email"
+            type="email"
+            value={formData.email}
+            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            placeholder="email@company.com"
+            required
+            disabled={loading}
+            className="pl-10 h-12 border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500"
+          />
+        </div>
+      </div>
+
+      {/* Password Field */}
+      <div className="space-y-2 group">
+        <Label htmlFor="password" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          Mật khẩu
+        </Label>
+        <div className="relative">
+          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-primary-500 transition-colors duration-200" />
+          <Input
+            id="password"
+            type={showPassword ? "text" : "password"}
+            value={formData.password}
+            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+            placeholder="••••••••"
+            required
+            disabled={loading}
+            className="pl-10 pr-10 h-12 border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-all duration-200 hover:scale-110"
+            tabIndex={-1}
+          >
+            {showPassword ? (
+              <EyeOff className="w-5 h-5" />
+            ) : (
+              <Eye className="w-5 h-5" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Remember & Forgot */}
+      <div className="flex items-center justify-between text-sm">
+        <label className="flex items-center gap-2 cursor-pointer group">
+          <input
+            type="checkbox"
+            className="w-4 h-4 text-primary-600 border-gray-300 dark:border-gray-600 rounded focus:ring-primary-500 focus:ring-2 transition-all duration-200 cursor-pointer"
+          />
+          <span className="text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-200 transition-colors">Ghi nhớ đăng nhập</span>
+        </label>
+        <a href="#" className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium transition-all duration-200 hover:underline">
+          Quên mật khẩu?
+        </a>
+      </div>
+
+      {/* Submit Button */}
+      <Button
+        type="submit"
+        disabled={loading || !csrfToken}
+        className="w-full h-12 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg shadow-lg shadow-primary-500/30 transition-all duration-300 hover:shadow-xl hover:shadow-primary-500/40 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+      >
+        {loading ? (
+          <>
+            <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+            Đang đăng nhập...
+          </>
+        ) : (
+          "Đăng nhập"
+        )}
+      </Button>
+    </form>
+  );
+}
+

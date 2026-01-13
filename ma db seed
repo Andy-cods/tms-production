@@ -1,0 +1,12 @@
+[35mapp/(dashboard)/admin/users/_components/ModernUserTable.tsx[m[36m:[m[32m26[m[36m:[m  [1;31mgamification[m?: {
+[35mapp/(dashboard)/admin/users/_components/ModernUserTable.tsx[m[36m:[m[32m201[m[36m:[m                      [1;31mgamification[m: user.[1;31mgamification[m || null,
+[35mapp/(dashboard)/leader/_components/LeaderDashboardClient.tsx[m[36m:[m[32m211[m[36m:[m                    {member.[1;31mgamification[m && (
+[35mapp/(dashboard)/leader/_components/LeaderDashboardClient.tsx[m[36m:[m[32m214[m[36m:[m                        <span className="font-bold text-orange-600">{member.[1;31mgamification[m.totalXP}</span>
+[35mcomponents/admin/user-table.tsx[m[36m:[m[32m41[m[36m:[m  [1;31mgamification[m?: {
+[35mcomponents/admin/user-table.tsx[m[36m:[m[32m154[m[36m:[m                        [1;31mgamification[m: user.[1;31mgamification[m || null,
+[35mcomponents/leader/team-tab.tsx[m[36m:[m[32m28[m[36m:[m  [1;31mgamification[m?: {
+[35mcomponents/leader/team-tab.tsx[m[36m:[m[32m104[m[36m:[m              [1;31mgamification[m: member.[1;31mgamification[m || undefined,
+[35mcomponents/requests/comments-section.tsx[m[36m:[m[32m22[m[36m:[m    [1;31mgamification[m?: {
+[35mcomponents/requests/comments-section.tsx[m[36m:[m[32m42[m[36m:[m    [1;31mgamification[m?: {
+[35mcomponents/requests/comments-section.tsx[m[36m:[m[32m113[m[36m:[m                  [1;31mgamification[m: comment.user.[1;31mgamification[m || null,
+[35mcomponents/requests/comments-section.tsx[m[36m:[m[32m164[m[36m:[m              [1;31mgamification[m: currentUser.[1;31mgamification[m || null,

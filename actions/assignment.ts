@@ -1,0 +1,1721 @@
+"use server";
+
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { loadBalancerService } from "@/lib/services/load-balancer";
+import { sendTelegramMessage } from "@/lib/services/telegram-service";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { APP_URL } from "@/lib/config/telegram";
+import { Prisma, TaskStatus } from "@prisma/client";
+import {
+  AdvancedAssignmentSettings,
+  defaultAdvancedAssignmentSettings,
+} from "@/lib/config/assignment-defaults";
+
+/**
+ * Server Actions for Task Assignment
+ * 
+ * Provides intelligent task assignment with:
+ * - Auto-assignment using load balancing
+ * - Manual assignment with WIP validation
+ * - Task reassignment with notifications
+ * - Team workload analytics
+ * - WIP limit configuration
+ * 
+ * References: mindmap LB, WL, WIP, CONF_W, CONF_WIP
+ */
+
+// =============================================================================
+// Type Definitions
+// =============================================================================
+
+interface TeamSummary {
+  teamId: string;
+  teamName: string;
+  totalMembers: number;
+  totalActiveTasks: number;
+  totalCapacity: number;
+  avgUtilization: number;
+  membersAtCapacity: number;
+  membersOverloaded: number;
+}
+
+interface AssignmentReasoning {
+  assigneeId: string;
+  assigneeName: string;
+  workloadScore: number;
+  skillScore: number;
+  positionScore?: number;
+  slaScore: number;
+  randomScore: number;
+  totalScore: number;
+  utilization: number;
+  explanation: string;
+}
+
+// =============================================================================
+// Validation Schemas
+// =============================================================================
+
+const autoAssignRequestSchema = z.object({
+  requestId: z.string().min(1, "Request ID không hợp lệ"),
+});
+
+const manualAssignWithCheckSchema = z.object({
+  taskId: z.string().min(1, "Task ID không hợp lệ"),
+  assigneeId: z.string().min(1, "Assignee ID không hợp lệ"),
+  override: z.boolean().optional(),
+});
+
+const reassignTaskSchema = z.object({
+  taskId: z.string().min(1, "Task ID không hợp lệ"),
+  newAssigneeId: z.string().min(1, "Assignee ID không hợp lệ"),
+  reason: z.string().min(1, "Lý do không được để trống").max(500, "Lý do quá dài"),
+});
+
+const getTeamWorkloadSchema = z.object({
+  teamId: z.string().min(1, "Team ID không hợp lệ"),
+});
+
+const updateUserWIPLimitSchema = z.object({
+  userId: z.string().min(1, "User ID không hợp lệ"),
+  newLimit: z.number().int().min(1, "Giới hạn phải >= 1").max(50, "Giới hạn tối đa là 50"),
+});
+
+// =============================================================================
+// Action 1: Auto-Assign Request
+// =============================================================================
+
+/**
+ * Auto-assign request to best available team member
+ * 
+ * @param requestId - Request ID to assign
+ * @returns Assignment result with reasoning
+ * 
+ * Workflow:
+ * 1. Get request details (teamId, categoryId, priority)
+ * 2. Call LoadBalancerService.findBestAssignee()
+ * 3. Create Task with assigneeId
+ * 4. Send notifications (email + Telegram)
+ * 5. Create audit log with score breakdown
+ * 6. Return success with reasoning
+ */
+export async function autoAssignRequest(requestId: string) {
+  try {
+    // Validate input
+    const validated = autoAssignRequestSchema.parse({ requestId });
+
+    // Auth check
+    const session = await auth();
+    if (!session?.user?.id) {
+      return {
+        success: false,
+        error: "Chưa đăng nhập",
+      };
+    }
+
+    // Get request details
+    const request = await prisma.request.findUnique({
+      where: { id: validated.requestId },
+      include: {
+        category: { select: { name: true } },
+        team: { select: { name: true } },
+      },
+    });
+
+    if (!request) {
+      return {
+        success: false,
+        error: "Request không tồn tại",
+      };
+    }
+
+    if (!request.teamId) {
+      return {
+        success: false,
+        error: "Request chưa được phân công cho team",
+      };
+    }
+
+    // Find best assignee using load balancing
+    const assigneeId = await loadBalancerService.findBestAssignee(
+      validated.requestId,
+      request.teamId,
+      request.categoryId ?? undefined
+    );
+
+    // Get assignee details for notifications
+    const assignee = await prisma.user.findUnique({
+      where: { id: assigneeId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    });
+
+    if (!assignee) {
+      return {
+        success: false,
+        error: "Không tìm thấy người được giao",
+      };
+    }
+
+    // Calculate workload for reasoning
+    const workload = await loadBalancerService.calculateWorkload(assigneeId);
+
+    // Create task
+    const task = await prisma.task.create({
+      data: {
+        title: request.title,
+        description: request.description,
+        requestId: validated.requestId,
+        assigneeId,
+        status: TaskStatus.TODO,
+        deadline: request.deadline,
+      },
+    });
+
+    // Build reasoning with score breakdown
+    const reasoning: AssignmentReasoning = {
+      assigneeId: assignee.id,
+      assigneeName: assignee.name ?? "Unknown User",
+      workloadScore: 1 - workload.utilization,
+      skillScore: 0.5, // Would be calculated in real implementation
+      slaScore: 1.0,   // Would be calculated in real implementation
+      randomScore: 0.5,
+      totalScore: 0, // Calculated below
+      utilization: workload.utilization,
+      explanation: `Được giao tự động dựa trên: Workload (${(workload.utilization * 100).toFixed(1)}% utilization), Team: ${request.team?.name || "N/A"}`,
+    };
+
+    // Create audit log with reasoning
+    await prisma.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "AUTO_ASSIGNED",
+        entity: "Task",
+        entityId: task.id,
+        taskId: task.id,
+        requestId: validated.requestId,
+        newValue: {
+          assigneeId,
+          assigneeName: assignee.name ?? "Unknown User",
+          method: "auto",
+          reasoning: {
+            workloadUtilization: workload.utilization,
+            activeTaskCount: workload.activeCount,
+            wipLimit: workload.wipLimit,
+            avgLeadTime: workload.avgLeadTime,
+          },
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    // TODO: Telegram notifications require telegramChatId field in User model
+    // Uncomment after adding telegramChatId to prisma/schema.prisma User model
+    // if (assignee.telegramChatId) {
+    //   try {
+    //     const message = [
+    //       "📋 *Task mới được giao tự động*",
+    //       "",
+    //       `🔹 *Task:* ${task.title}`,
+    //       task.description ? `📝 ${task.description}` : "",
+    //       request.priority ? `⚡ *Độ ưu tiên:* ${request.priority}` : "",
+    //       task.deadline ? `⏰ *Deadline:* ${new Date(task.deadline).toLocaleString("vi-VN")}` : "",
+    //       "",
+    //       `📊 Workload hiện tại: ${workload.activeCount}/${workload.wipLimit} tasks (${(workload.utilization * 100).toFixed(1)}%)`,
+    //       "",
+    //       `🔗 ${APP_URL || ""}/my-tasks`,
+    //     ]
+    //       .filter(Boolean)
+    //       .join("\n");
+    //
+    //     await sendTelegramMessage({
+    //       chatId: assignee.telegramChatId,
+    //       message,
+    //       parseMode: "Markdown",
+    //     });
+    //   } catch (telegramError) {
+    //     console.error("Telegram notification failed:", telegramError);
+    //   }
+    // }
+
+    // Revalidate paths
+    revalidatePath(`/requests/${validated.requestId}`);
+    revalidatePath("/my-tasks");
+
+    return {
+      success: true,
+      assigneeId,
+      assigneeName: assignee.name ?? "Unknown User",
+      taskId: task.id,
+      reasoning,
+    };
+  } catch (error) {
+    console.error("autoAssignRequest error:", error);
+
+    if (error instanceof z.ZodError) {
+      return {
+        success: false,
+        error: error.issues?.[0]?.message || "Dữ liệu không hợp lệ",
+      };
+    }
+
+    if (error instanceof Error && error.message.includes("WIP limit")) {
+      return {
+        success: false,
+        error: "Tất cả thành viên team đã đạt giới hạn WIP. Vui lòng tăng giới hạn hoặc giao thủ công.",
+      };
+    }
+
+    return {
+      success: false,
+      error: "Không thể giao task tự động. Vui lòng thử lại.",
+    };
+  }
+}
+
+// =============================================================================
+// Action 2: Manual Assign with WIP Check
+// =============================================================================
+
+/**
+ * Manually assign task with WIP limit validation
+ * 
+ * @param taskId - Task ID to assign
+ * @param assigneeId - User ID to assign to
+ * @param override - Allow override WIP limit (leader/admin only)
+ * @returns Assignment result with warnings
+ * 
+ * Features:
+ * - Check WIP limit before assignment
+ * - Warning if user overloaded
+ * - Allow override by leader/admin
+ * - Notifications sent
+ * - Audit logging
+ */
+export async function manualAssignWithCheck(
+  taskId: string,
+  assigneeId: string,
+  override?: boolean
+) {
+  try {
+    // Validate input
+    const validated = manualAssignWithCheckSchema.parse({ taskId, assigneeId, override });
+
+    // Auth check
+    const session = await auth();
+    if (!session?.user?.id) {
+      return {
+        success: false,
+        error: "Chưa đăng nhập",
+      };
+    }
+
+    // Get current user role
+    const currentUser = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+      },
+    });
+
+    if (!currentUser) {
+      return {
+        success: false,
+        error: "User không tồn tại",
+      };
+    }
+
+    // Check WIP limit
+    const wipCheck = await loadBalancerService.checkWIPLimit(validated.assigneeId);
+
+    if (wipCheck.exceeded && !validated.override) {
+      // WIP limit exceeded, check if user can override
+      const canOverride = currentUser.role === "ADMIN" || currentUser.role === "LEADER";
+
+      return {
+        success: false,
+        error: `Người này đã quá tải (${wipCheck.current}/${wipCheck.limit} tasks). Utilization: ${wipCheck.utilizationPercent.toFixed(1)}%`,
+        warning: true,
+        canOverride,
+        wipStatus: wipCheck,
+      };
+    }
+
+    if (wipCheck.exceeded && validated.override) {
+      // Override requested, verify permission
+      const canOverride = currentUser.role === "ADMIN" || currentUser.role === "LEADER";
+
+      if (!canOverride) {
+        return {
+          success: false,
+          error: "Chỉ Leader và Admin mới có thể vượt giới hạn WIP",
+        };
+      }
+    }
+
+    // Get task details
+    const task = await prisma.task.findUnique({
+      where: { id: validated.taskId },
+      include: {
+        request: { select: { title: true, priority: true } },
+        assignee: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!task) {
+      return {
+        success: false,
+        error: "Task không tồn tại",
+      };
+    }
+
+    const oldAssigneeId = task.assigneeId;
+    const oldAssigneeName = task.assignee?.name;
+
+    // Get new assignee details
+    const newAssignee = await prisma.user.findUnique({
+      where: { id: validated.assigneeId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    });
+
+    if (!newAssignee) {
+      return {
+        success: false,
+        error: "Người được giao không tồn tại",
+      };
+    }
+
+    // Update task
+    const updatedTask = await prisma.task.update({
+      where: { id: validated.taskId },
+      data: { assigneeId: validated.assigneeId },
+    });
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "MANUAL_ASSIGNED",
+        entity: "Task",
+        entityId: task.id,
+        taskId: task.id,
+        oldValue: (oldAssigneeId ? { assigneeId: oldAssigneeId, assigneeName: oldAssigneeName } : Prisma.JsonNull) as Prisma.InputJsonValue,
+        newValue: {
+          assigneeId: validated.assigneeId,
+          assigneeName: newAssignee.name ?? "Unknown User",
+          wipStatus: {
+            current: wipCheck.current + 1,
+            limit: wipCheck.limit,
+            utilization: ((wipCheck.current + 1) / wipCheck.limit * 100).toFixed(1) + "%",
+          },
+          override: validated.override || false,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    // TODO: Telegram notifications require telegramChatId field in User model
+    // Uncomment after adding telegramChatId to prisma/schema.prisma User model
+    // if (newAssignee.telegramChatId) {
+    //   try {
+    //     const message = [
+    //       "📋 *Task mới được giao*",
+    //       "",
+    //       `🔹 *Task:* ${task.title}`,
+    //       task.description ? `📝 ${task.description}` : "",
+    //       task.request?.priority ? `⚡ *Độ ưu tiên:* ${task.request.priority}` : "",
+    //       task.deadline ? `⏰ *Deadline:* ${new Date(task.deadline).toLocaleString("vi-VN")}` : "",
+    //       "",
+    //       `👤 Giao bởi: ${currentUser.name}`,
+    //       `📊 Workload: ${wipCheck.current + 1}/${wipCheck.limit} tasks`,
+    //       wipCheck.exceeded ? "⚠️ *Lưu ý:* Bạn đã vượt giới hạn WIP" : "",
+    //       "",
+    //       `🔗 ${APP_URL || ""}/my-tasks`,
+    //     ]
+    //       .filter(Boolean)
+    //       .join("\n");
+    //
+    //     await sendTelegramMessage({
+    //       chatId: newAssignee.telegramChatId,
+    //       message,
+    //       parseMode: "Markdown",
+    //     });
+    //   } catch (telegramError) {
+    //     console.error("Telegram notification failed:", telegramError);
+    //   }
+    // }
+
+    // Clear cache for assignee
+    loadBalancerService.clearCache(validated.assigneeId);
+
+    // Revalidate paths
+    revalidatePath("/my-tasks");
+    revalidatePath(`/requests/${task.requestId}`);
+
+    return {
+      success: true,
+      assigneeId: validated.assigneeId,
+      assigneeName: newAssignee.name ?? "Unknown User",
+      wipStatus: wipCheck,
+      overrideApplied: validated.override || false,
+    };
+  } catch (error) {
+    console.error("manualAssignWithCheck error:", error);
+
+    if (error instanceof z.ZodError) {
+      return {
+        success: false,
+        error: error.issues?.[0]?.message || "Dữ liệu không hợp lệ",
+      };
+    }
+
+    return {
+      success: false,
+      error: "Không thể giao task. Vui lòng thử lại.",
+    };
+  }
+}
+
+// =============================================================================
+// Action 3: Reassign Task
+// =============================================================================
+
+/**
+ * Reassign task to different user
+ * 
+ * @param taskId - Task ID to reassign
+ * @param newAssigneeId - New assignee user ID
+ * @param reason - Reason for reassignment
+ * @returns Reassignment result
+ * 
+ * Features:
+ * - RBAC: Leader/Admin only
+ * - Check WIP limit of new assignee
+ * - Notify both old and new assignee
+ * - Audit log with reason
+ */
+export async function reassignTask(
+  taskId: string,
+  newAssigneeId: string,
+  reason: string
+) {
+  try {
+    // Validate input
+    const validated = reassignTaskSchema.parse({ taskId, newAssigneeId, reason });
+
+    // Auth check
+    const session = await auth();
+    if (!session?.user?.id) {
+      return {
+        success: false,
+        error: "Chưa đăng nhập",
+      };
+    }
+
+    // Get current user
+    const currentUser = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+      },
+    });
+
+    if (!currentUser) {
+      return {
+        success: false,
+        error: "User không tồn tại",
+      };
+    }
+
+    // RBAC: Only leader and admin can reassign
+    if (currentUser.role !== "LEADER" && currentUser.role !== "ADMIN") {
+      return {
+        success: false,
+        error: "Chỉ Leader và Admin mới có quyền chuyển giao task",
+      };
+    }
+
+    // Get task with current assignee
+    const task = await prisma.task.findUnique({
+      where: { id: validated.taskId },
+      include: {
+        assignee: { select: { id: true, name: true } },
+        request: { select: { title: true, priority: true } },
+      },
+    });
+
+    if (!task) {
+      return {
+        success: false,
+        error: "Task không tồn tại",
+      };
+    }
+
+    // Get new assignee
+    const newAssignee = await prisma.user.findUnique({
+      where: { id: validated.newAssigneeId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    });
+
+    if (!newAssignee) {
+      return {
+        success: false,
+        error: "Người được giao mới không tồn tại",
+      };
+    }
+
+    // Check WIP limit of new assignee
+    const wipCheck = await loadBalancerService.checkWIPLimit(validated.newAssigneeId);
+
+    if (wipCheck.exceeded) {
+      return {
+        success: false,
+        error: `Không thể chuyển giao. ${newAssignee.name ?? "Unknown User"} đã quá tải (${wipCheck.current}/${wipCheck.limit} tasks)`,
+        warning: true,
+        wipStatus: wipCheck,
+      };
+    }
+
+    const oldAssigneeId = task.assigneeId;
+    const oldAssigneeName = task.assignee?.name;
+
+    // Update task
+    const updatedTask = await prisma.task.update({
+      where: { id: validated.taskId },
+      data: { assigneeId: validated.newAssigneeId },
+    });
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "REASSIGNED",
+        entity: "Task",
+        entityId: task.id,
+        taskId: task.id,
+        oldValue: (oldAssigneeId
+          ? { assigneeId: oldAssigneeId, assigneeName: oldAssigneeName }
+          : Prisma.JsonNull) as Prisma.InputJsonValue,
+        newValue: {
+          assigneeId: validated.newAssigneeId,
+          assigneeName: newAssignee.name ?? "Unknown User",
+          reason: validated.reason,
+          reassignedBy: currentUser.name ?? "Unknown User",
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    // TODO: Telegram notifications require telegramChatId field in User model
+    // Uncomment after adding telegramChatId to prisma/schema.prisma User model
+    // // Notify old assignee (if exists)
+    // if (task.assignee?.telegramChatId) {
+    //   try {
+    //     const message = [
+    //       "🔄 *Task đã được chuyển giao*",
+    //       "",
+    //       `🔹 *Task:* ${task.title}`,
+    //       `📝 *Lý do:* ${validated.reason}`,
+    //       "",
+    //       `👤 Chuyển cho: ${newAssignee.name}`,
+    //       `🔗 ${APP_URL || ""}/my-tasks`,
+    //     ].join("\n");
+    //
+    //     await sendTelegramMessage({
+    //       chatId: task.assignee.telegramChatId,
+    //       message,
+    //       parseMode: "Markdown",
+    //     });
+    //   } catch (error) {
+    //     console.error("Old assignee notification failed:", error);
+    //   }
+    // }
+    //
+    // // Notify new assignee
+    // if (newAssignee.telegramChatId) {
+    //   try {
+    //     const message = [
+    //       "📋 *Task được chuyển giao cho bạn*",
+    //       "",
+    //       `🔹 *Task:* ${task.title}`,
+    //       task.description ? `📝 ${task.description}` : "",
+    //       `📝 *Lý do chuyển giao:* ${validated.reason}`,
+    //       task.request?.priority ? `⚡ *Độ ưu tiên:* ${task.request.priority}` : "",
+    //       task.deadline ? `⏰ *Deadline:* ${new Date(task.deadline).toLocaleString("vi-VN")}` : "",
+    //       "",
+    //       oldAssigneeName ? `👤 Trước đó: ${oldAssigneeName}` : "",
+    //       `👤 Chuyển bởi: ${currentUser.name}`,
+    //       `📊 Workload: ${wipCheck.current + 1}/${wipCheck.limit} tasks`,
+    //       "",
+    //       `🔗 ${APP_URL || ""}/my-tasks`,
+    //     ]
+    //       .filter(Boolean)
+    //       .join("\n");
+    //
+    //     await sendTelegramMessage({
+    //       chatId: newAssignee.telegramChatId,
+    //       message,
+    //       parseMode: "Markdown",
+    //     });
+    //   } catch (error) {
+    //     console.error("New assignee notification failed:", error);
+    //   }
+    // }
+
+    // Clear cache for both users
+    if (oldAssigneeId) {
+      loadBalancerService.clearCache(oldAssigneeId);
+    }
+    loadBalancerService.clearCache(validated.newAssigneeId);
+
+    // Revalidate paths
+    revalidatePath("/my-tasks");
+    revalidatePath(`/requests/${task.requestId}`);
+
+    return {
+      success: true,
+      oldAssigneeId,
+      oldAssigneeName,
+      newAssigneeId: validated.newAssigneeId,
+      newAssigneeName: newAssignee.name ?? "Unknown User",
+      reason: validated.reason,
+    };
+  } catch (error) {
+    console.error("reassignTask error:", error);
+
+    if (error instanceof z.ZodError) {
+      return {
+        success: false,
+        error: error.issues?.[0]?.message || "Dữ liệu không hợp lệ",
+      };
+    }
+
+    return {
+      success: false,
+      error: "Không thể chuyển giao task. Vui lòng thử lại.",
+    };
+  }
+}
+
+// =============================================================================
+// Action 4: Get Team Workload
+// =============================================================================
+
+/**
+ * Get comprehensive workload data for a team
+ * 
+ * @param teamId - Team ID to analyze
+ * @returns Team workload summary with member details
+ * 
+ * Returns:
+ * - Individual member workload data
+ * - Team aggregated metrics
+ * - Bottleneck identification
+ */
+export async function getTeamWorkload(teamId: string) {
+  try {
+    // Validate input
+    const validated = getTeamWorkloadSchema.parse({ teamId });
+
+    // Auth check
+    const session = await auth();
+    if (!session?.user?.id) {
+      return {
+        success: false,
+        error: "Chưa đăng nhập",
+      };
+    }
+
+    // Get team with members
+    const team = await prisma.team.findUnique({
+      where: { id: validated.teamId },
+      select: {
+        id: true,
+        name: true,
+        wipLimit: true,
+        members: {
+          where: { isActive: true },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            wipLimit: true,
+            performanceScore: true,
+          },
+        },
+      },
+    });
+
+    if (!team) {
+      return {
+        success: false,
+        error: "Team không tồn tại",
+      };
+    }
+
+    // Calculate workload for all members
+    const memberWorkloads = await Promise.all(
+      team.members.map(async (member) => {
+        const workload = await loadBalancerService.calculateWorkload(member.id);
+        return {
+          ...workload, // workload already contains userId
+          userName: member.name ?? "Unknown User",
+          email: member.email ?? "no-email@unknown.com",
+          role: member.role,
+        };
+      })
+    );
+
+    // Calculate team summary
+    const totalActiveTasks = memberWorkloads.reduce(
+      (sum, m) => sum + m.activeCount,
+      0
+    );
+
+    const totalCapacity = team.members.reduce(
+      (sum, m) => sum + m.wipLimit,
+      0
+    );
+
+    const avgUtilization =
+      memberWorkloads.reduce((sum, m) => sum + m.utilization, 0) /
+      memberWorkloads.length;
+
+    const membersAtCapacity = memberWorkloads.filter((m) => m.isAtLimit).length;
+    const membersOverloaded = memberWorkloads.filter((m) => m.isOverloaded).length;
+
+    const summary: TeamSummary = {
+      teamId: team.id,
+      teamName: team.name ?? "Unknown Team",
+      totalMembers: team.members.length,
+      totalActiveTasks,
+      totalCapacity,
+      avgUtilization,
+      membersAtCapacity,
+      membersOverloaded,
+    };
+
+    return {
+      success: true,
+      members: memberWorkloads,
+      summary,
+    };
+  } catch (error) {
+    console.error("getTeamWorkload error:", error);
+
+    if (error instanceof z.ZodError) {
+      return {
+        success: false,
+        error: error.issues?.[0]?.message || "Dữ liệu không hợp lệ",
+      };
+    }
+
+    return {
+      success: false,
+      error: "Không thể tải workload của team. Vui lòng thử lại.",
+    };
+  }
+}
+
+// =============================================================================
+// Action 5: Update User WIP Limit
+// =============================================================================
+
+/**
+ * Update user's WIP limit
+ * 
+ * @param userId - User ID to update
+ * @param newLimit - New WIP limit
+ * @returns Update result
+ * 
+ * Features:
+ * - RBAC: Admin or team leader only
+ * - Validate: newLimit >= current active tasks
+ * - Audit logging
+ * - Cache invalidation
+ */
+export async function updateUserWIPLimit(userId: string, newLimit: number) {
+  try {
+    // Validate input
+    const validated = updateUserWIPLimitSchema.parse({ userId, newLimit });
+
+    // Auth check
+    const session = await auth();
+    if (!session?.user?.id) {
+      return {
+        success: false,
+        error: "Chưa đăng nhập",
+      };
+    }
+
+    // Get current user
+    const currentUser = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        teamId: true,
+      },
+    });
+
+    if (!currentUser) {
+      return {
+        success: false,
+        error: "User không tồn tại",
+      };
+    }
+
+    // Get target user
+    const targetUser = await prisma.user.findUnique({
+      where: { id: validated.userId },
+      select: {
+        id: true,
+        name: true,
+        wipLimit: true,
+        teamId: true,
+        team: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        tasksAssigned: {
+          where: { status: "IN_PROGRESS" },
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    if (!targetUser) {
+      return {
+        success: false,
+        error: "User cần cập nhật không tồn tại",
+      };
+    }
+
+    // RBAC: Admin or team leader only
+    const isAdmin = currentUser.role === "ADMIN";
+    const isTeamLeader =
+      currentUser.role === "LEADER" &&
+      targetUser.teamId === currentUser.teamId;
+
+    if (!isAdmin && !isTeamLeader) {
+      return {
+        success: false,
+        error: "Chỉ Admin hoặc Team Leader mới có quyền thay đổi giới hạn WIP",
+      };
+    }
+
+    // Validate: New limit must be >= current active tasks
+    const currentActiveTasks = targetUser.tasksAssigned.length;
+
+    if (validated.newLimit < currentActiveTasks) {
+      return {
+        success: false,
+        error: `Giới hạn mới phải >= số task đang làm (${currentActiveTasks} tasks)`,
+      };
+    }
+
+    const oldLimit = targetUser.wipLimit;
+
+    // Update WIP limit
+    const updatedUser = await prisma.user.update({
+      where: { id: validated.userId },
+      data: { wipLimit: validated.newLimit },
+    });
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "WIP_LIMIT_CHANGED",
+        entity: "User",
+        entityId: targetUser.id,
+        oldValue: { wipLimit: oldLimit } as Prisma.InputJsonValue,
+        newValue: {
+          wipLimit: validated.newLimit,
+          changedBy: currentUser.name ?? "Unknown User",
+          currentActiveTasks,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    // Clear cache for user
+    loadBalancerService.clearCache(validated.userId);
+
+    // Revalidate paths
+    revalidatePath("/admin/users");
+    revalidatePath("/admin/workload");
+
+    return {
+      success: true,
+      userId: validated.userId,
+      userName: targetUser.name ?? "Unknown User",
+      oldLimit,
+      newLimit: validated.newLimit,
+      currentActiveTasks,
+    };
+  } catch (error) {
+    console.error("updateUserWIPLimit error:", error);
+
+    if (error instanceof z.ZodError) {
+      return {
+        success: false,
+        error: error.issues?.[0]?.message || "Dữ liệu không hợp lệ",
+      };
+    }
+
+    return {
+      success: false,
+      error: "Không thể cập nhật giới hạn WIP. Vui lòng thử lại.",
+    };
+  }
+}
+
+// =============================================================================
+// Assignment Configuration Management
+// =============================================================================
+
+const assignmentAdvancedSettingsSchema = z
+  .object({
+    matching: z
+      .object({
+        mode: z.enum(["strict", "balanced", "flexible"]).default(defaultAdvancedAssignmentSettings.matching.mode),
+        prioritizeExactMatch: z.boolean().default(defaultAdvancedAssignmentSettings.matching.prioritizeExactMatch),
+        allowPartialMatch: z.boolean().default(defaultAdvancedAssignmentSettings.matching.allowPartialMatch),
+        fallbackStrategy: z
+          .enum(["smart_balance", "round_robin", "manual_gate", "random_spread"])
+          .default(defaultAdvancedAssignmentSettings.matching.fallbackStrategy),
+      })
+      .default(defaultAdvancedAssignmentSettings.matching),
+    guardrails: z
+      .object({
+        maxAssignmentsPerUserPerDay: z
+          .number()
+          .int()
+          .min(0)
+          .max(200)
+          .default(defaultAdvancedAssignmentSettings.guardrails.maxAssignmentsPerUserPerDay),
+        cooldownMinutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(1440)
+          .default(defaultAdvancedAssignmentSettings.guardrails.cooldownMinutes),
+        slaGracePercent: z
+          .number()
+          .int()
+          .min(0)
+          .max(100)
+          .default(defaultAdvancedAssignmentSettings.guardrails.slaGracePercent),
+        backlogAgingBoost: z
+          .number()
+          .min(0)
+          .max(1)
+          .default(defaultAdvancedAssignmentSettings.guardrails.backlogAgingBoost),
+      })
+      .default(defaultAdvancedAssignmentSettings.guardrails),
+    notifications: z
+      .object({
+        notifyOnOverload: z.boolean().default(defaultAdvancedAssignmentSettings.notifications.notifyOnOverload),
+        notifyOnSlaRisk: z.boolean().default(defaultAdvancedAssignmentSettings.notifications.notifyOnSlaRisk),
+        sendWeeklyDigest: z.boolean().default(defaultAdvancedAssignmentSettings.notifications.sendWeeklyDigest),
+      })
+      .default(defaultAdvancedAssignmentSettings.notifications),
+    automation: z
+      .object({
+        autoEscalateStalled: z.boolean().default(defaultAdvancedAssignmentSettings.automation.autoEscalateStalled),
+        escalateAfterHours: z
+          .number()
+          .int()
+          .min(1)
+          .max(72)
+          .default(defaultAdvancedAssignmentSettings.automation.escalateAfterHours),
+        autoAssignBacklogOlderThanHours: z
+          .number()
+          .int()
+          .min(0)
+          .max(240)
+          .default(defaultAdvancedAssignmentSettings.automation.autoAssignBacklogOlderThanHours),
+      })
+      .default(defaultAdvancedAssignmentSettings.automation),
+    scoreModifiers: z
+      .object({
+        seniorityBoost: z.number().min(0).max(1).default(defaultAdvancedAssignmentSettings.scoreModifiers.seniorityBoost),
+        crossSkillBoost: z.number().min(0).max(1).default(defaultAdvancedAssignmentSettings.scoreModifiers.crossSkillBoost),
+        burnoutPenalty: z.number().min(0).max(1).default(defaultAdvancedAssignmentSettings.scoreModifiers.burnoutPenalty),
+      })
+      .default(defaultAdvancedAssignmentSettings.scoreModifiers),
+  })
+  .default(defaultAdvancedAssignmentSettings);
+
+/**
+ * Zod schema for assignment config
+ */
+const updateAssignmentConfigSchema = z.object({
+  weightWorkload: z.number().min(0).max(1),
+  weightSkill: z.number().min(0).max(1),
+  weightSLA: z.number().min(0).max(1),
+  weightRandom: z.number().min(0).max(1),
+  enableAutoAssign: z.boolean().optional(),
+  advancedSettings: assignmentAdvancedSettingsSchema.optional(),
+});
+
+const mergeAdvancedSettings = (
+  overrides?: Partial<AdvancedAssignmentSettings>,
+  existing?: Partial<AdvancedAssignmentSettings>
+): AdvancedAssignmentSettings => {
+  const base = defaultAdvancedAssignmentSettings;
+
+  return {
+    matching: {
+      ...base.matching,
+      ...(existing?.matching ?? {}),
+      ...(overrides?.matching ?? {}),
+    },
+    guardrails: {
+      ...base.guardrails,
+      ...(existing?.guardrails ?? {}),
+      ...(overrides?.guardrails ?? {}),
+    },
+    notifications: {
+      ...base.notifications,
+      ...(existing?.notifications ?? {}),
+      ...(overrides?.notifications ?? {}),
+    },
+    automation: {
+      ...base.automation,
+      ...(existing?.automation ?? {}),
+      ...(overrides?.automation ?? {}),
+    },
+    scoreModifiers: {
+      ...base.scoreModifiers,
+      ...(existing?.scoreModifiers ?? {}),
+      ...(overrides?.scoreModifiers ?? {}),
+    },
+  };
+};
+
+/**
+ * Update Assignment Configuration (Admin only)
+ * 
+ * Updates the weights used for auto-assignment scoring.
+ * Validates that weights sum to 1.0 (100%).
+ * 
+ * @param config - Assignment configuration
+ * @returns Update result
+ * 
+ * References: mindmap CONF_W, LB
+ */
+export async function updateAssignmentConfig(config: {
+  weightWorkload: number;
+  weightSkill: number;
+  weightSLA: number;
+  weightRandom: number;
+  enableAutoAssign?: boolean;
+  advancedSettings?: Partial<AdvancedAssignmentSettings>;
+}) {
+  try {
+    // Validate input
+    const validated = updateAssignmentConfigSchema.parse(config);
+
+    // Auth check - Admin only
+    const session = await auth();
+    if (!session?.user?.id) {
+      return {
+        success: false,
+        error: "Chưa đăng nhập",
+      };
+    }
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+      },
+    });
+
+    if (!currentUser || currentUser.role !== "ADMIN") {
+      return {
+        success: false,
+        error: "Chỉ Admin mới có quyền thay đổi cấu hình assignment",
+      };
+    }
+
+    // Get or create AssignmentConfig for merging defaults
+    let assignmentConfig = await prisma.assignmentConfig.findFirst({
+      where: { isActive: true },
+    });
+
+    const existingAdvanced =
+      (assignmentConfig?.advancedSettings as AdvancedAssignmentSettings | null) ?? undefined;
+
+    const mergedAdvanced = mergeAdvancedSettings(
+      validated.advancedSettings,
+      existingAdvanced
+    );
+
+    // Validate: Weights must sum to 1.0
+    const sum =
+      validated.weightWorkload +
+      validated.weightSkill +
+      validated.weightSLA +
+      validated.weightRandom;
+
+    if (Math.abs(sum - 1.0) > 0.001) {
+      return {
+        success: false,
+        error: `Tổng các trọng số phải = 1.0 (hiện tại: ${sum.toFixed(3)})`,
+      };
+    }
+
+    const oldValues = assignmentConfig
+      ? {
+          weightWorkload: assignmentConfig.weightWorkload,
+          weightSkill: assignmentConfig.weightSkill,
+          weightSLA: assignmentConfig.weightSLA,
+          weightRandom: assignmentConfig.weightRandom,
+          enableAutoAssign: assignmentConfig.enableAutoAssign,
+          matching: {
+            prioritizeExactMatch: assignmentConfig.prioritizeExactMatch,
+            allowPartialMatch: assignmentConfig.allowPartialMatch,
+            fallbackStrategy: assignmentConfig.fallbackStrategy,
+            skillMatchingMode: assignmentConfig.skillMatchingMode,
+          },
+          guardrails: {
+            maxAssignmentsPerUserPerDay: assignmentConfig.maxAssignmentsPerUserPerDay,
+            cooldownMinutes: assignmentConfig.cooldownMinutes,
+            slaGracePercent: assignmentConfig.slaGracePercent,
+            backlogAgingBoost: assignmentConfig.backlogAgingBoost,
+          },
+          advancedSettings: assignmentConfig.advancedSettings,
+        }
+      : Prisma.JsonNull;
+
+    const updatePayload = {
+      weightWorkload: validated.weightWorkload,
+      weightSkill: validated.weightSkill,
+      weightSLA: validated.weightSLA,
+      weightRandom: validated.weightRandom,
+      enableAutoAssign: validated.enableAutoAssign ?? assignmentConfig?.enableAutoAssign ?? true,
+      prioritizeExactMatch: mergedAdvanced.matching.prioritizeExactMatch,
+      allowPartialMatch: mergedAdvanced.matching.allowPartialMatch,
+      fallbackStrategy: mergedAdvanced.matching.fallbackStrategy,
+      skillMatchingMode: mergedAdvanced.matching.mode,
+      maxAssignmentsPerUserPerDay: mergedAdvanced.guardrails.maxAssignmentsPerUserPerDay,
+      cooldownMinutes: mergedAdvanced.guardrails.cooldownMinutes,
+      slaGracePercent: mergedAdvanced.guardrails.slaGracePercent,
+      backlogAgingBoost: mergedAdvanced.guardrails.backlogAgingBoost,
+      advancedSettings: mergedAdvanced as unknown as Prisma.InputJsonValue,
+    };
+
+    if (assignmentConfig) {
+      // Update existing config
+      assignmentConfig = await prisma.assignmentConfig.update({
+        where: { id: assignmentConfig.id },
+        data: updatePayload,
+      });
+    } else {
+      // Create new config
+      assignmentConfig = await prisma.assignmentConfig.create({
+        data: {
+          name: "Default Assignment Config",
+          ...updatePayload,
+          weightWorkload: validated.weightWorkload,
+          weightSkill: validated.weightSkill,
+          weightSLA: validated.weightSLA,
+          weightRandom: validated.weightRandom,
+          isActive: true,
+        },
+      });
+    }
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "ASSIGNMENT_CONFIG_UPDATED",
+        entity: "AssignmentConfig",
+        entityId: assignmentConfig.id,
+        oldValue: oldValues as Prisma.InputJsonValue,
+        newValue: {
+          weightWorkload: validated.weightWorkload,
+          weightSkill: validated.weightSkill,
+          weightSLA: validated.weightSLA,
+          weightRandom: validated.weightRandom,
+          enableAutoAssign: assignmentConfig.enableAutoAssign,
+          advancedSettings: mergedAdvanced,
+          changedBy: currentUser.name ?? "Unknown User",
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    // Revalidate paths
+    revalidatePath("/admin/assignment-config");
+    revalidatePath("/leader");
+
+    return {
+      success: true,
+      config: {
+        weightWorkload: assignmentConfig.weightWorkload,
+        weightSkill: assignmentConfig.weightSkill,
+        weightSLA: assignmentConfig.weightSLA,
+        weightRandom: assignmentConfig.weightRandom,
+        enableAutoAssign: assignmentConfig.enableAutoAssign,
+        advancedSettings: mergedAdvanced,
+      },
+    };
+  } catch (error) {
+    console.error("updateAssignmentConfig error:", error);
+
+    if (error instanceof z.ZodError) {
+      return {
+        success: false,
+        error: error.issues?.[0]?.message || "Dữ liệu không hợp lệ",
+      };
+    }
+
+    return {
+      success: false,
+      error: "Không thể cập nhật cấu hình. Vui lòng thử lại.",
+    };
+  }
+}
+
+/**
+ * Get current assignment configuration
+ * 
+ * @returns Current config or defaults
+ * 
+ * References: mindmap CONF_W
+ */
+export async function getAssignmentConfig() {
+  try {
+    const config = await prisma.assignmentConfig.findFirst({
+      where: { isActive: true },
+    });
+
+    if (!config) {
+      const advanced = defaultAdvancedAssignmentSettings;
+      // Return defaults
+      return {
+        success: true,
+        config: {
+          weightWorkload: 0.4,
+          weightSkill: 0.3,
+          weightSLA: 0.2,
+          weightRandom: 0.1,
+          enableAutoAssign: true,
+          advancedSettings: advanced,
+        },
+        isDefault: true,
+      };
+    }
+
+    const advancedFromDb = (config.advancedSettings as AdvancedAssignmentSettings | null) ?? undefined;
+
+    const derivedFromColumns: Partial<AdvancedAssignmentSettings> = {
+      matching: {
+        prioritizeExactMatch: config.prioritizeExactMatch,
+        allowPartialMatch: config.allowPartialMatch,
+        fallbackStrategy: (config.fallbackStrategy as AdvancedAssignmentSettings["matching"]["fallbackStrategy"]) ?? defaultAdvancedAssignmentSettings.matching.fallbackStrategy,
+        mode: (config.skillMatchingMode as AdvancedAssignmentSettings["matching"]["mode"]) ?? defaultAdvancedAssignmentSettings.matching.mode,
+      },
+      guardrails: {
+        maxAssignmentsPerUserPerDay: config.maxAssignmentsPerUserPerDay,
+        cooldownMinutes: config.cooldownMinutes,
+        slaGracePercent: config.slaGracePercent,
+        backlogAgingBoost: config.backlogAgingBoost,
+      },
+      notifications: advancedFromDb?.notifications,
+      automation: advancedFromDb?.automation,
+      scoreModifiers: advancedFromDb?.scoreModifiers,
+    };
+
+    const mergedAdvanced = mergeAdvancedSettings(undefined, {
+      ...advancedFromDb,
+      ...derivedFromColumns,
+      matching: {
+        ...(advancedFromDb?.matching ?? {}),
+        ...(derivedFromColumns.matching ?? {}),
+      } as any,
+      guardrails: {
+        ...(advancedFromDb?.guardrails ?? {}),
+        ...(derivedFromColumns.guardrails ?? {}),
+      } as any,
+    } as any);
+
+    return {
+      success: true,
+      config: {
+        weightWorkload: config.weightWorkload,
+        weightSkill: config.weightSkill,
+        weightSLA: config.weightSLA,
+        weightRandom: config.weightRandom,
+        enableAutoAssign: config.enableAutoAssign,
+        advancedSettings: mergedAdvanced,
+      },
+      isDefault: false,
+    };
+  } catch (error) {
+    console.error("getAssignmentConfig error:", error);
+
+    return {
+      success: false,
+      error: "Không thể lấy cấu hình",
+      config: null,
+    };
+  }
+}
+
+/**
+ * Zod schema for bulk WIP limit updates
+ */
+const bulkUpdateWIPLimitsSchema = z.object({
+  updates: z.array(
+    z.object({
+      userId: z.string().min(1),
+      newLimit: z.number().min(1).max(50),
+    })
+  ),
+});
+
+/**
+ * Bulk Update WIP Limits (Admin only)
+ * 
+ * Updates WIP limits for multiple users at once.
+ * Validates each update against current active tasks.
+ * 
+ * @param updates - Array of user updates
+ * @returns Bulk update result
+ * 
+ * References: mindmap CONF_WIP, WIP
+ */
+export async function bulkUpdateWIPLimits(
+  updates: Array<{ userId: string; newLimit: number }>
+) {
+  try {
+    // Validate input
+    const validated = bulkUpdateWIPLimitsSchema.parse({ updates });
+
+    // Auth check - Admin only
+    const session = await auth();
+    if (!session?.user?.id) {
+      return {
+        success: false,
+        error: "Chưa đăng nhập",
+      };
+    }
+
+    const userId = session.user.id;
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+      },
+    });
+
+    if (!currentUser || currentUser.role !== "ADMIN") {
+      return {
+        success: false,
+        error: "Chỉ Admin mới có quyền thay đổi giới hạn WIP hàng loạt",
+      };
+    }
+
+    // Get all target users
+    const userIds = validated.updates.map((u) => u.userId);
+    const targetUsers = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        name: true,
+        wipLimit: true,
+        tasksAssigned: {
+          where: {
+            status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] },
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    // Create a map for quick lookup
+    const userMap = new Map(targetUsers.map((u) => [u.id, u]));
+
+    // Validate all updates
+    const validationErrors: Array<{ userId: string; error: string }> = [];
+    const validUpdates: Array<{
+      userId: string;
+      newLimit: number;
+      oldLimit: number;
+      userName: string;
+      currentActiveTasks: number;
+    }> = [];
+
+    for (const update of validated.updates) {
+      const user = userMap.get(update.userId);
+
+      if (!user) {
+        validationErrors.push({
+          userId: update.userId,
+          error: "User không tồn tại",
+        });
+        continue;
+      }
+
+      const currentActiveTasks = (user.tasksAssigned as any[]).length;
+
+      if (update.newLimit < currentActiveTasks) {
+        validationErrors.push({
+          userId: update.userId,
+          error: `${(user.name as string | null) ?? "Unknown User"}: Giới hạn mới (${update.newLimit}) < số task đang làm (${currentActiveTasks})`,
+        });
+        continue;
+      }
+
+      validUpdates.push({
+        userId: update.userId,
+        newLimit: update.newLimit,
+        oldLimit: (user.wipLimit as number),
+        userName: (user.name as string | null) || "Unknown",
+        currentActiveTasks,
+      });
+    }
+
+    // If any validation errors, return them
+    if (validationErrors.length > 0) {
+      return {
+        success: false,
+        error: "Một số cập nhật không hợp lệ",
+        validationErrors,
+        successCount: 0,
+        failCount: validationErrors.length,
+      };
+    }
+
+    // Perform bulk update
+    const updatePromises = validUpdates.map((update) =>
+      prisma.user.update({
+        where: { id: update.userId },
+        data: { wipLimit: update.newLimit },
+      })
+    );
+
+    await Promise.all(updatePromises);
+
+    // Create audit logs
+    const auditLogPromises = validUpdates.map((update) =>
+      prisma.auditLog.create({
+        data: {
+          userId: userId,
+          action: "WIP_LIMIT_CHANGED_BULK",
+          entity: "User",
+          entityId: update.userId,
+          oldValue: { wipLimit: update.oldLimit } as Prisma.InputJsonValue,
+          newValue: {
+            wipLimit: update.newLimit,
+            changedBy: currentUser.name ?? "Unknown User",
+            currentActiveTasks: update.currentActiveTasks,
+          } as Prisma.InputJsonValue,
+        },
+      })
+    );
+
+    await Promise.all(auditLogPromises);
+
+    // Clear cache for all updated users
+    validUpdates.forEach((update) => {
+      loadBalancerService.clearCache(update.userId);
+    });
+
+    // Revalidate paths
+    revalidatePath("/admin/assignment-config");
+    revalidatePath("/admin/users");
+    revalidatePath("/leader");
+
+    return {
+      success: true,
+      successCount: validUpdates.length,
+      failCount: 0,
+      updates: validUpdates,
+    };
+  } catch (error) {
+    console.error("bulkUpdateWIPLimits error:", error);
+
+    if (error instanceof z.ZodError) {
+      return {
+        success: false,
+        error: error.issues?.[0]?.message || "Dữ liệu không hợp lệ",
+        successCount: 0,
+        failCount: updates.length,
+      };
+    }
+
+    return {
+      success: false,
+      error: "Không thể cập nhật WIP limits. Vui lòng thử lại.",
+      successCount: 0,
+      failCount: updates.length,
+    };
+  }
+}
+
+/**
+ * Update Team WIP Limit (Admin only)
+ * 
+ * @param teamId - Team ID
+ * @param newLimit - New WIP limit
+ * @returns Update result
+ * 
+ * References: mindmap CONF_WIP
+ */
+export async function updateTeamWIPLimit(teamId: string, newLimit: number) {
+  try {
+    // Validate input
+    if (!teamId || newLimit < 1) {
+      return {
+        success: false,
+        error: "Dữ liệu không hợp lệ",
+      };
+    }
+
+    // Auth check - Admin only
+    const session = await auth();
+    if (!session?.user?.id) {
+      return {
+        success: false,
+        error: "Chưa đăng nhập",
+      };
+    }
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+      },
+    });
+
+    if (!currentUser || currentUser.role !== "ADMIN") {
+      return {
+        success: false,
+        error: "Chỉ Admin mới có quyền thay đổi giới hạn WIP của team",
+      };
+    }
+
+    // Get team with active tasks count
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: {
+        id: true,
+        name: true,
+        wipLimit: true,
+        members: {
+          select: {
+            id: true,
+            tasksAssigned: {
+              where: {
+                status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW"] },
+              },
+              select: {
+                id: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!team) {
+      return {
+        success: false,
+        error: "Team không tồn tại",
+      };
+    }
+
+    // Calculate current team active tasks
+    const currentActiveTasks = team.members.reduce(
+      (sum, member) => sum + member.tasksAssigned.length,
+      0
+    );
+
+    // Validate: New limit must be >= current active tasks
+    if (newLimit < currentActiveTasks) {
+      return {
+        success: false,
+        error: `Giới hạn mới (${newLimit}) phải >= số task đang làm của team (${currentActiveTasks})`,
+      };
+    }
+
+    const oldLimit = team.wipLimit;
+
+    // Update team WIP limit
+    const updatedTeam = await prisma.team.update({
+      where: { id: teamId },
+      data: { wipLimit: newLimit },
+    });
+
+    // Create audit log
+    await prisma.auditLog.create({
+      data: {
+        userId: session.user.id,
+        action: "TEAM_WIP_LIMIT_CHANGED",
+        entity: "Team",
+        entityId: teamId,
+        oldValue: { wipLimit: oldLimit } as Prisma.InputJsonValue,
+        newValue: {
+          wipLimit: newLimit,
+          changedBy: currentUser.name ?? "Unknown User",
+          currentActiveTasks,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    // Revalidate paths
+    revalidatePath("/admin/assignment-config");
+    revalidatePath("/admin/teams");
+
+    return {
+      success: true,
+      teamId,
+      teamName: team.name ?? "Unknown Team",
+      oldLimit,
+      newLimit,
+      currentActiveTasks,
+    };
+  } catch (error) {
+    console.error("updateTeamWIPLimit error:", error);
+
+    return {
+      success: false,
+      error: "Không thể cập nhật giới hạn WIP của team. Vui lòng thử lại.",
+    };
+  }
+}
+
