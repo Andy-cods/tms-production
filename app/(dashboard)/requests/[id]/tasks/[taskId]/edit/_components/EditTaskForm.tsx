@@ -74,12 +74,12 @@ export function EditTaskForm({
       const result = await updateTaskAction(task.id, formDataToSubmit);
 
       if (result.ok) {
-        toast.success("Thành công", result.message || "Đã cập nhật nhiệm vụ");
+        toast.success(result.message || "Đã cập nhật nhiệm vụ");
         router.push(`/requests/${requestId}`);
         router.refresh();
       } else {
         setError(result.message || "Lỗi cập nhật nhiệm vụ");
-        toast.error("Lỗi", result.message || "Không thể cập nhật nhiệm vụ");
+        toast.error(result.message || "Không thể cập nhật nhiệm vụ");
       }
     });
   };
