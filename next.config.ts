@@ -84,6 +84,10 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
+
+  // Turbopack configuration (Next.js 16 default bundler)
+  // Empty config acknowledges Turbopack usage and silences webpack config warning
+  turbopack: {},
 };
 
 // Conditionally apply Sentry only in production or if explicitly enabled
