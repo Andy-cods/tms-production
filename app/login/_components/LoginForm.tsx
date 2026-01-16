@@ -1,35 +1,43 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, Loader2, ShieldAlert } from "lucide-react";
 
 export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  
+
   // Get callbackUrl and ensure it's a valid relative path
   const rawCallbackUrl = params.get("callbackUrl");
   let callbackUrl = "/dashboard";
-  
+
   if (rawCallbackUrl) {
     // Only use callbackUrl if it's a valid relative path
     if (rawCallbackUrl.startsWith("/") && !rawCallbackUrl.startsWith("//")) {
       callbackUrl = rawCallbackUrl;
     }
   }
-  
+
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [isIPBlocked, setIsIPBlocked] = useState(false);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
     otp: "",
+  });
+
+  // Get client info for anomaly detection
+  const getClientInfo = () => ({
+    userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+    // IP will be extracted server-side from headers
+    clientIP: "client", // Placeholder - server will use actual IP from headers
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,11 +65,15 @@ export function LoginForm() {
       // Store callbackUrl for use after successful login
       const finalCallbackUrl = safeCallbackUrl;
       
+      const clientInfo = getClientInfo();
+
       const result = await signIn("credentials", {
         email: formData.email,
         password: formData.password,
         otp: formData.otp || undefined,
-        redirect: false
+        clientIP: clientInfo.clientIP,
+        userAgent: clientInfo.userAgent,
+        redirect: false,
         // Don't pass callbackUrl to signIn to avoid URL construction issues
         // We'll handle redirect manually
       });
@@ -71,6 +83,9 @@ export function LoginForm() {
           setError("Tài khoản đang bị khóa tạm thời. Vui lòng thử lại sau.");
         } else if (result.error === "TWO_FACTOR_REQUIRED") {
           setError("Vui lòng nhập mã 2FA để đăng nhập.");
+        } else if (result.error === "IP_BLOCKED") {
+          setIsIPBlocked(true);
+          setError("Địa chỉ IP của bạn đã bị tạm khóa do hoạt động đáng ngờ. Vui lòng thử lại sau.");
         } else {
           setError("Email hoặc mật khẩu không đúng");
         }
@@ -98,8 +113,12 @@ export function LoginForm() {
     <form onSubmit={handleSubmit} className="space-y-5 relative z-10">
       {/* Error Message */}
       {error && (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg text-sm flex items-center gap-2 animate-fade-in shadow-sm">
-          <span className="font-medium">⚠️</span>
+        <div className={`${isIPBlocked ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-400' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'} border px-4 py-3 rounded-lg text-sm flex items-center gap-2 animate-fade-in shadow-sm`}>
+          {isIPBlocked ? (
+            <ShieldAlert className="w-5 h-5 flex-shrink-0" />
+          ) : (
+            <span className="font-medium">⚠️</span>
+          )}
           <span>{error}</span>
         </div>
       )}

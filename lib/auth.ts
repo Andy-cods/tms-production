@@ -8,6 +8,17 @@ import { z } from "zod";
 import os from "os";
 import { decryptPII } from "@/lib/security/crypto";
 import { verifyTwoFactorToken } from "@/lib/security/two-factor";
+import {
+  analyzeLogin,
+  isIPBlocked,
+  blockIP,
+  recordLoginAttempt,
+} from "@/lib/security/anomaly-detection";
+import {
+  securityLogger,
+  SecurityEventType,
+  SecurityEventSeverity,
+} from "@/lib/security/security-logger";
 
 function resolveBaseUrl() {
   const fromEnv =
@@ -115,6 +126,8 @@ const credSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
   otp: z.string().optional(),
+  clientIP: z.string().optional(),
+  userAgent: z.string().optional(),
 });
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -198,11 +211,39 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
         otp: { label: "2FA Code", type: "text" },
+        clientIP: { label: "Client IP", type: "hidden" },
+        userAgent: { label: "User Agent", type: "hidden" },
       },
-      async authorize(raw) {
-        const { email, password, otp } = credSchema.parse(raw);
+      async authorize(raw, request) {
+        const { email, password, otp, clientIP, userAgent } = credSchema.parse(raw);
 
-        const user = await prisma.user.findUnique({ 
+        // Extract real IP from request headers (more reliable than client-provided)
+        let ip = "unknown";
+        if (request) {
+          ip =
+            request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+            request.headers.get("x-real-ip") ||
+            request.headers.get("cf-connecting-ip") ||
+            clientIP ||
+            "unknown";
+        } else if (clientIP && clientIP !== "client") {
+          ip = clientIP;
+        }
+
+        // === ANOMALY DETECTION: Check if IP is blocked ===
+        if (isIPBlocked(ip)) {
+          await securityLogger.log({
+            type: SecurityEventType.AUTH_LOGIN_FAILURE,
+            severity: SecurityEventSeverity.HIGH,
+            userEmail: email,
+            ipAddress: ip,
+            outcome: "BLOCKED",
+            details: { reason: "IP is temporarily blocked" },
+          });
+          throw new Error("IP_BLOCKED");
+        }
+
+        const user = await prisma.user.findUnique({
           where: { email },
           select: {
             id: true,
@@ -217,10 +258,42 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             twoFactorSecret: true,
           },
         });
-        if (!user || !user.password) return null;
+
+        // === ANOMALY DETECTION: Analyze login attempt (even for non-existent users) ===
+        if (!user || !user.password) {
+          const analysis = await analyzeLogin(null, ip, false, { email, userAgent });
+
+          // Block IP if risk is critical (credential stuffing)
+          if (analysis.riskLevel === "CRITICAL") {
+            blockIP(ip, 30 * 60 * 1000); // Block for 30 minutes
+          }
+
+          await securityLogger.log({
+            type: SecurityEventType.AUTH_LOGIN_FAILURE,
+            severity: SecurityEventSeverity.LOW,
+            userEmail: email,
+            ipAddress: ip,
+            outcome: "FAILURE",
+            details: {
+              reason: "User not found",
+              riskScore: analysis.riskScore,
+              riskLevel: analysis.riskLevel,
+            },
+          });
+          return null;
+        }
 
         const now = new Date();
         if (user.lockoutUntil && user.lockoutUntil > now) {
+          await securityLogger.log({
+            type: SecurityEventType.ACCOUNT_LOCKOUT,
+            severity: SecurityEventSeverity.MEDIUM,
+            userId: user.id,
+            userEmail: email,
+            ipAddress: ip,
+            outcome: "BLOCKED",
+            details: { lockoutUntil: user.lockoutUntil },
+          });
           throw new Error("ACCOUNT_LOCKED");
         }
 
@@ -231,6 +304,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             failedCount >= MAX_FAILED_LOGINS
               ? new Date(now.getTime() + LOCKOUT_MINUTES * 60 * 1000)
               : null;
+
           await prisma.user.update({
             where: { id: user.id },
             data: {
@@ -238,6 +312,34 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               lockoutUntil,
             },
           });
+
+          // === ANOMALY DETECTION: Record failed login ===
+          const analysis = await analyzeLogin(user.id, ip, false, { email, userAgent });
+
+          // Block IP if risk is high or critical
+          if (analysis.riskLevel === "CRITICAL") {
+            blockIP(ip, 60 * 60 * 1000); // Block for 1 hour
+          } else if (analysis.riskLevel === "HIGH") {
+            blockIP(ip, 15 * 60 * 1000); // Block for 15 minutes
+          }
+
+          await securityLogger.log({
+            type: SecurityEventType.AUTH_LOGIN_FAILURE,
+            severity: lockoutUntil ? SecurityEventSeverity.MEDIUM : SecurityEventSeverity.LOW,
+            userId: user.id,
+            userEmail: email,
+            ipAddress: ip,
+            outcome: "FAILURE",
+            details: {
+              reason: "Invalid password",
+              failedAttempts: failedCount,
+              willLockout: !!lockoutUntil,
+              riskScore: analysis.riskScore,
+              riskLevel: analysis.riskLevel,
+              anomalies: analysis.anomalies.map(a => a.type),
+            },
+          });
+
           return null;
         }
 
@@ -259,16 +361,70 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                 lockoutUntil,
               },
             });
+
+            // Record failed 2FA attempt
+            recordLoginAttempt(user.id, ip, false);
+
+            await securityLogger.log({
+              type: SecurityEventType.AUTH_2FA_FAILURE,
+              severity: SecurityEventSeverity.MEDIUM,
+              userId: user.id,
+              userEmail: email,
+              ipAddress: ip,
+              outcome: "FAILURE",
+              details: { reason: "Invalid 2FA code", failedAttempts: failedCount },
+            });
+
             return null;
           }
+
+          // Log successful 2FA
+          await securityLogger.log({
+            type: SecurityEventType.AUTH_2FA_SUCCESS,
+            severity: SecurityEventSeverity.INFO,
+            userId: user.id,
+            userEmail: email,
+            ipAddress: ip,
+            outcome: "SUCCESS",
+          });
         }
 
+        // Reset failed attempts on successful login
         if (user.failedLoginAttempts || user.lockoutUntil) {
           await prisma.user.update({
             where: { id: user.id },
             data: {
               failedLoginAttempts: 0,
               lockoutUntil: null,
+            },
+          });
+        }
+
+        // === ANOMALY DETECTION: Analyze successful login ===
+        const analysis = await analyzeLogin(user.id, ip, true, { email, userAgent });
+
+        // Log successful login with anomaly info
+        await securityLogger.logLoginSuccess(user.id, email, ip, userAgent);
+
+        // If anomalous but successful, log warning
+        if (analysis.isAnomaly && analysis.riskLevel !== "LOW") {
+          await securityLogger.log({
+            type: SecurityEventType.THREAT_SUSPICIOUS_PATTERN,
+            severity: analysis.riskLevel === "CRITICAL"
+              ? SecurityEventSeverity.CRITICAL
+              : analysis.riskLevel === "HIGH"
+              ? SecurityEventSeverity.HIGH
+              : SecurityEventSeverity.MEDIUM,
+            userId: user.id,
+            userEmail: email,
+            ipAddress: ip,
+            outcome: "WARNING",
+            details: {
+              message: "Anomalous login detected",
+              riskScore: analysis.riskScore,
+              riskLevel: analysis.riskLevel,
+              anomalies: analysis.anomalies.map(a => a.type),
+              recommendations: analysis.recommendations,
             },
           });
         }
