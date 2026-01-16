@@ -151,7 +151,52 @@ export async function deleteTemplate(templateId: string) {
   }
 }
 
-export async function duplicateTemplate(_templateId: string) {
-  // TODO: implement duplicateTemplate logic
-  return { success: true };
+export async function duplicateTemplate(templateId: string) {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return { success: false, error: "Chưa đăng nhập" };
+    }
+
+    // Get original template
+    const original = await templateService.getTemplateById(
+      templateId,
+      session.user.id
+    );
+
+    if (!original.success || !original.template) {
+      return { success: false, error: original.error || "Template không tồn tại" };
+    }
+
+    const template = original.template;
+
+    // Create duplicate with new name
+    const result = await templateService.createTemplate(
+      {
+        name: `${template.name} (Copy)`,
+        description: template.description || "",
+        icon: template.icon || "📋",
+        defaultTitle: template.defaultTitle || "",
+        defaultDescription: template.defaultDescription || "",
+        defaultPriority: template.defaultPriority || "MEDIUM",
+        defaultCategoryId: template.defaultCategoryId || "",
+        estimatedDays: template.estimatedDays || 3,
+        isPublic: false, // Copies are private by default
+        checklistItems: template.checklistItems?.map((item: any, index: number) => ({
+          title: item.title,
+          order: index,
+        })) || [],
+      },
+      session.user.id
+    );
+
+    if (result.success) {
+      revalidatePath("/templates");
+    }
+
+    return result;
+  } catch (error) {
+    console.error("[duplicateTemplate]:", error);
+    return { success: false, error: "Lỗi nhân bản template" };
+  }
 }

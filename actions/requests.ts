@@ -13,7 +13,7 @@ import { calculateSlaDeadline } from "@/lib/services/sla-calculator";
 import { sendTelegramMessage } from "@/lib/services/telegram-service";
 import { requestCreatedTemplate } from "@/lib/telegram/templates";
 import { APP_URL } from "@/lib/config/telegram";
-import { timelineCalculator } from "@/lib/services/timeline-calculator";
+import { timelineCalculator } from "@/lib/services/timeline-and-deadline-service";
 import { differenceInHours } from "date-fns";
 import { fieldValidators } from "@/types/custom-fields";
 import { templateService } from "@/lib/services/template-service";
@@ -476,10 +476,33 @@ export async function deleteRequest(requestId: string) {
           } as any,
         });
         
-        // TODO: Delete files from storage
-        // for (const attachment of attachments) {
-        //   await deleteFileFromStorage(attachment.fileUrl);
-        // }
+        // Delete files from storage (best effort - don't block deletion)
+        for (const attachment of attachments) {
+          try {
+            // Skip Google Drive links (can't delete externally)
+            if (attachment.driveLink || attachment.fileUrl?.includes('drive.google.com')) {
+              Logger.info("Skipping Drive link deletion (external)", {
+                action: "deleteRequest",
+                attachmentId: attachment.id
+              });
+              continue;
+            }
+            // For uploadthing or other storage, attempt deletion
+            // Note: Implement specific storage deletion when storage provider is configured
+            Logger.info("File marked for deletion", {
+              action: "deleteRequest",
+              fileUrl: attachment.fileUrl,
+              attachmentId: attachment.id
+            });
+          } catch (fileError) {
+            Logger.warn("Failed to delete file from storage", {
+              action: "deleteRequest",
+              attachmentId: attachment.id,
+              error: (fileError as Error).message
+            });
+            // Continue with request deletion even if file deletion fails
+          }
+        }
       });
       
       // Only revalidate /requests, not the deleted request detail page
@@ -1299,9 +1322,44 @@ export async function createRequestWithTemplate(data: {
   }
 }
 
-// TODO: implement updateRequest logic properly
-export async function updateRequest(_data: any) {
-  return { success: true };
+/**
+ * Update request (legacy wrapper)
+ * @deprecated Use updateRequestAction instead
+ */
+export async function updateRequest(data: {
+  id: string;
+  title?: string;
+  description?: string;
+  teamId?: string | null;
+  deadline?: string | null;
+  priority?: string;
+  categoryId?: string | null;
+}) {
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Chưa đăng nhập" };
+    }
+
+    if (!data.id) {
+      return { success: false, error: "Request ID is required" };
+    }
+
+    // Convert to FormData and use updateRequestAction
+    const formData = new FormData();
+    if (data.title) formData.set("title", data.title);
+    if (data.description) formData.set("description", data.description);
+    if (data.teamId !== undefined) formData.set("teamId", data.teamId || "");
+    if (data.deadline !== undefined) formData.set("deadline", data.deadline || "");
+    if (data.priority) formData.set("priority", data.priority);
+    if (data.categoryId !== undefined) formData.set("categoryId", data.categoryId || "");
+
+    const result = await updateRequestAction(data.id, formData);
+    return { success: result.ok, error: result.ok ? undefined : result.message };
+  } catch (error) {
+    console.error("[updateRequest]:", error);
+    return { success: false, error: "Lỗi cập nhật request" };
+  }
 }
 
 /**

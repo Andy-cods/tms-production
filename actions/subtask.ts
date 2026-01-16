@@ -163,40 +163,41 @@ export async function createSubtask(data: {
         select: { requestId: true },
       });
 
-      // TODO: Telegram notification requires telegramChatId field in User model
-      // if (result.subtask.assigneeId) {
-      //   try {
-      //     const assignee = await prisma.user.findUnique({
-      //       where: { id: result.subtask.assigneeId },
-      //     });
-      //
-      //     if (assignee?.telegramChatId) {
-      //       const message = [
-      //         "📋 *Subtask mới được giao*",
-      //         "",
-      //         `🔹 *Subtask:* ${result.subtask.title}`,
-      //         result.subtask.description ? `📝 ${result.subtask.description}` : "",
-      //         result.subtask.deadline
-      //           ? `⏰ *Deadline:* ${new Date(result.subtask.deadline).toLocaleString("vi-VN")}`
-      //           : "",
-      //         "",
-      //         `👤 Giao bởi: ${user.name}`,
-      //         `🔗 ${APP_URL || ""}/my-tasks`,
-      //       ]
-      //         .filter(Boolean)
-      //         .join("\n");
-      //
-      //       await sendTelegramMessage({
-      //         chatId: assignee.telegramChatId,
-      //         message,
-      //         parseMode: "Markdown",
-      //       });
-      //     }
-      //   } catch (telegramError) {
-      //     console.error("Telegram notification failed:", telegramError);
-      //     // Don't fail the whole operation if telegram fails
-      //   }
-      // }
+      // Send Telegram notification to assignee
+      if (result.subtask.assigneeId) {
+        try {
+          const assignee = await prisma.user.findUnique({
+            where: { id: result.subtask.assigneeId },
+          });
+
+          const wantsTelegram = (assignee as any)?.notificationChannel === "TELEGRAM" || (assignee as any)?.notificationChannel === "BOTH";
+          if ((assignee as any)?.telegramChatId && wantsTelegram) {
+            const message = [
+              "📋 *Subtask mới được giao*",
+              "",
+              `🔹 *Subtask:* ${result.subtask.title}`,
+              result.subtask.description ? `📝 ${result.subtask.description}` : "",
+              (result.subtask as any).deadline
+                ? `⏰ *Deadline:* ${new Date((result.subtask as any).deadline).toLocaleString("vi-VN")}`
+                : "",
+              "",
+              `👤 Giao bởi: ${user.name}`,
+              `🔗 ${APP_URL || ""}/my-tasks`,
+            ]
+              .filter(Boolean)
+              .join("\n");
+
+            await sendTelegramMessage({
+              chatId: (assignee as any).telegramChatId,
+              message,
+              parseMode: "Markdown",
+            });
+          }
+        } catch (telegramError) {
+          console.error("Telegram notification failed:", telegramError);
+          // Don't fail the whole operation if telegram fails
+        }
+      }
 
       // Revalidate paths
       revalidatePath("/my-tasks");
@@ -619,40 +620,40 @@ export async function updateSubtaskStatus(
 
       // If all subtasks are DONE, notify team leader
       if (statusResult.status.canComplete && subtask.parentTask.request?.team) {
-        // TODO: Telegram notification requires telegramChatId field in User model
-        // try {
-        //   const team = await prisma.team.findUnique({
-        //     where: { id: subtask.parentTask.request.team.id },
-        //   });
-        //
-        //   if (team?.leaderId) {
-        //     const leader = await prisma.user.findUnique({
-        //       where: { id: team.leaderId },
-        //     });
-        //
-        //     if (leader?.telegramChatId) {
-        //       const message = [
-        //         "✅ *Tất cả subtasks đã hoàn thành!*",
-        //         "",
-        //         `📋 *Parent Task:* ${subtask.parentTask.title}`,
-        //         `🔹 *Subtasks:* ${statusResult.status.subtaskCounts.total}/${statusResult.status.subtaskCounts.total} hoàn thành`,
-        //         "",
-        //         "Parent task đã sẵn sàng để review và đánh dấu hoàn thành.",
-        //         "",
-        //         `🔗 ${APP_URL || ""}/my-tasks`,
-        //       ].join("\n");
-        //
-        //       await sendTelegramMessage({
-        //         chatId: leader.telegramChatId,
-        //         message,
-        //         parseMode: "Markdown",
-        //       });
-        //     }
-        //   }
-        // } catch (telegramError) {
-        //   console.error("Leader notification failed:", telegramError);
-        //   // Don't fail the operation
-        // }
+        try {
+          const team = await prisma.team.findUnique({
+            where: { id: subtask.parentTask.request.team.id },
+          });
+
+          if (team?.leaderId) {
+            const leader = await prisma.user.findUnique({
+              where: { id: team.leaderId },
+            });
+
+            const wantsTelegram = (leader as any)?.notificationChannel === "TELEGRAM" || (leader as any)?.notificationChannel === "BOTH";
+            if ((leader as any)?.telegramChatId && wantsTelegram) {
+              const message = [
+                "✅ *Tất cả subtasks đã hoàn thành!*",
+                "",
+                `📋 *Parent Task:* ${subtask.parentTask.title}`,
+                `🔹 *Subtasks:* ${statusResult.status.subtaskCounts.total}/${statusResult.status.subtaskCounts.total} hoàn thành`,
+                "",
+                "Parent task đã sẵn sàng để review và đánh dấu hoàn thành.",
+                "",
+                `🔗 ${APP_URL || ""}/my-tasks`,
+              ].join("\n");
+
+              await sendTelegramMessage({
+                chatId: (leader as any).telegramChatId,
+                message,
+                parseMode: "Markdown",
+              });
+            }
+          }
+        } catch (telegramError) {
+          console.error("Leader notification failed:", telegramError);
+          // Don't fail the operation
+        }
       }
     }
 

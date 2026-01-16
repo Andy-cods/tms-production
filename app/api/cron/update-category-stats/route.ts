@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deadlineCalculator } from "@/lib/services/deadline-calculator";
+import { deadlineCalculator } from "@/lib/services/timeline-and-deadline-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

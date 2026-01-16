@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@/lib/auth";
-import { deadlineCalculator } from "@/lib/services/deadline-calculator";
+import { deadlineCalculator } from "@/lib/services/timeline-and-deadline-service";
 
 export async function getDeadlineRange(categoryId: string) {
   try {
