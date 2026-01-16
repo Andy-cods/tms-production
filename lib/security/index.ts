@@ -95,6 +95,42 @@ export {
 export { verifyCronAuth } from "./cron-auth";
 
 // =============================================================================
+// Input Sanitization
+// =============================================================================
+export {
+  sanitizeString,
+  sanitizeNumber,
+  sanitizeBoolean,
+  sanitizeArray,
+  sanitizeObject,
+  sanitizeRequestBody,
+  sanitizeFormData,
+  withSanitization,
+  detectThreats,
+  fieldSanitizers,
+  type SanitizeOptions,
+  type ThreatDetectionResult,
+} from "./input-sanitizer";
+
+// =============================================================================
+// Anomaly Detection
+// =============================================================================
+export {
+  analyzeUserBehavior,
+  analyzeLogin,
+  recordAction,
+  recordLoginAttempt,
+  getUserRiskProfile,
+  getIPReputation,
+  clearUserActivity,
+  blockIP,
+  isIPBlocked,
+  unblockIP,
+  type AnomalyResult,
+  type AnomalyDetail,
+} from "./anomaly-detection";
+
+// =============================================================================
 // Edge Middleware Utilities
 // =============================================================================
 export {
