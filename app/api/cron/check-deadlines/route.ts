@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { notificationService } from "@/lib/services/notification-service";
+import { verifyCronAuth } from "@/lib/security/cron-auth";
 
 export async function GET(request: Request) {
+  // Verify CRON authentication with timing-safe comparison
+  const authError = verifyCronAuth(request);
+  if (authError) return authError;
+
   try {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
 
     const now = new Date();
     const in1h = new Date(now.getTime() + 60 * 60 * 1000);

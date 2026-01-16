@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { escalationService } from "@/lib/services/escalation-service";
+import { verifyCronAuth } from "@/lib/security/cron-auth";
 
 /**
  * Escalation Detection Cron Endpoint
- * 
+ *
  * Periodically checks for escalation conditions and creates escalations.
  * Runs every 15 minutes to detect:
  * - NO_CONFIRMATION (L1: 24h)
  * - CLARIFICATION_TIMEOUT (L1C: 8h)
  * - SLA_OVERDUE
  * - STUCK_TASK
- * 
+ *
  * Vercel Cron Configuration:
  * Add to vercel.json:
  * ```json
@@ -21,9 +22,9 @@ import { escalationService } from "@/lib/services/escalation-service";
  *   }]
  * }
  * ```
- * 
+ *
  * Alternative: Use node-cron in lib/init/escalation-scheduler.ts
- * 
+ *
  * References: mindmap L1, L1C
  */
 
@@ -31,21 +32,13 @@ import { escalationService } from "@/lib/services/escalation-service";
 let escalationHistory: Array<{ timestamp: Date; count: number }> = [];
 
 export async function GET(request: NextRequest) {
+  // Verify CRON authentication with timing-safe comparison
+  const authError = verifyCronAuth(request);
+  if (authError) return authError;
+
   const startTime = Date.now();
 
   try {
-    // Verify cron secret for security
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      console.error("❌ Unauthorized escalation cron attempt");
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
     console.log("🔍 Escalation cron job started...");
 
     // Run escalation checks

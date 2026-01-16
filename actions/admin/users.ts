@@ -6,11 +6,13 @@ import { Role, Prisma } from '@prisma/client';
 import { auth } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
 import bcrypt from 'bcryptjs';
+import { passwordSchema } from '@/lib/validations/password';
+import { encryptPII } from '@/lib/security/crypto';
 
 const addUserSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
-  password: z.string().min(6),
+  password: passwordSchema,
   role: z.nativeEnum(Role),
   teamId: z.string().optional(),
   positionText: z.string().optional(),
@@ -52,8 +54,8 @@ export async function addUser(data: z.infer<typeof addUserSchema>) {
         role: validated.role,
         teamId: validated.teamId || null,
         positionText: validated.positionText || null,
-        phone: validated.phone || null,
-        telegramUsername: validated.telegramUsername || null,
+        phone: encryptPII(validated.phone) || null,
+        telegramUsername: encryptPII(validated.telegramUsername) || null,
         permissionTickets: validated.permissionTickets || [],
         isActive: true,
       } as any, // Temporary type assertion until Prisma client fully regenerates
@@ -144,9 +146,7 @@ export async function changeUserPassword(userId: string, newPassword: string) {
     }
 
     // Validate password
-    if (!newPassword || newPassword.length < 6) {
-      return { success: false, error: 'Mật khẩu phải có ít nhất 6 ký tự' };
-    }
+    passwordSchema.parse(newPassword);
 
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
@@ -161,10 +161,14 @@ export async function changeUserPassword(userId: string, newPassword: string) {
     // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Update password
+    // Update password and reset lockout status
     await prisma.user.update({
       where: { id: userId },
-      data: { password: hashedPassword } as any,
+      data: {
+        password: hashedPassword,
+        failedLoginAttempts: 0, // Reset failed attempts
+        lockoutUntil: null,     // Clear any existing lockout
+      } as any,
     });
 
     // Create audit log
@@ -187,6 +191,9 @@ export async function changeUserPassword(userId: string, newPassword: string) {
     return { success: true };
   } catch (error) {
     console.error('[changeUserPassword]:', error);
+    if (error instanceof z.ZodError) {
+      return { success: false, error: error.issues.map((e) => e.message).join(", ") };
+    }
     return { success: false, error: 'Lỗi đổi mật khẩu' };
   }
 }
@@ -239,8 +246,18 @@ export async function updateUser(
         role: data.role ? data.role : undefined,
         teamId: data.teamId === undefined ? undefined : data.teamId,
         positionText: data.positionText === undefined ? undefined : data.positionText,
-        phone: data.phone === undefined ? undefined : data.phone,
-        telegramUsername: data.telegramUsername === undefined ? undefined : data.telegramUsername,
+        phone:
+          data.phone === undefined
+            ? undefined
+            : data.phone
+            ? encryptPII(data.phone)
+            : null,
+        telegramUsername:
+          data.telegramUsername === undefined
+            ? undefined
+            : data.telegramUsername
+            ? encryptPII(data.telegramUsername)
+            : null,
         permissionTickets: data.permissionTickets === undefined ? undefined : data.permissionTickets,
       } as any, // Temporary type assertion until Prisma client fully regenerates
     });

@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deadlineCalculator } from "@/lib/services/timeline-and-deadline-service";
+import { verifyCronAuth } from "@/lib/security/cron-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  // Verify CRON authentication with timing-safe comparison
+  const authError = verifyCronAuth(request);
+  if (authError) return authError;
+
   try {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
 
     const results = await deadlineCalculator.updateAllCategoryStats();
 

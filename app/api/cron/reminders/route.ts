@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { reminderService } from "@/lib/services/reminder-service";
+import { verifyCronAuth } from "@/lib/security/cron-auth";
 
 /**
  * Vercel Cron Endpoint for Reminders
- * 
+ *
  * Alternative to node-cron for serverless environments.
  * Checks all tasks and sends due reminders.
- * 
+ *
  * Configure in vercel.json:
  * {
  *   "crons": [{
@@ -15,25 +16,18 @@ import { reminderService } from "@/lib/services/reminder-service";
  *     "schedule": "* * * * *"
  *   }]
  * }
- * 
+ *
  * Or use external cron service to hit this endpoint every minute.
- * 
+ *
  * References: mindmap R1-3, IM
  */
 
 export async function GET(request: NextRequest) {
+  // Verify CRON authentication with timing-safe comparison
+  const authError = verifyCronAuth(request);
+  if (authError) return authError;
+
   try {
-    // Verify cron secret for security
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
     console.log("🔔 Cron job: Checking for due reminders...");
 
     const now = new Date();
