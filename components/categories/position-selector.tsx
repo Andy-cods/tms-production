@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -34,18 +34,18 @@ export function PositionSelector({
   const [positions, setPositions] = useState<Array<{ position: string; count: number }>>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadPositions();
-  }, []);
-
-  async function loadPositions() {
+  const loadPositions = useCallback(async () => {
     setLoading(true);
     const result = await getAllUserPositions();
     if ((result as any).success && (result as any).positions) {
       setPositions((result as any).positions);
     }
     setLoading(false);
-  }
+  }, []);
+
+  useEffect(() => {
+    void loadPositions();
+  }, [loadPositions]);
 
   function handleSelect(position: string) {
     if (value.includes(position)) {

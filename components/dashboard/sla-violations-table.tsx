@@ -12,7 +12,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Eye, Download, ArrowUpDown } from "lucide-react";
-import type { SLAViolation, SLASeverity } from "@/lib/services/sla-analysis-service";
+import type { SLAViolation } from "@/lib/services/sla-analysis-service";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
 

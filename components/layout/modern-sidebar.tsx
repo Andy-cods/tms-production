@@ -112,14 +112,8 @@ function NavLink({
   return content
 }
 
-const mainNavItems: NavItem[] = [
-  { href: "/dashboard", label: "Tổng quan", icon: LayoutDashboard },
-  { href: "/requests", label: "Yêu cầu", icon: FileText },
-  { href: "/my-tasks", label: "Công việc của tôi", icon: CheckSquare },
-  { href: "/notifications", label: "Thông báo", icon: Bell },
-];
-
-const adminNavItems: NavItem[] = [
+// Admin navigation items for collapsed view
+const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: "/admin/overview", label: "Bảng Admin", icon: Shield },
   { href: "/admin/users", label: "Người dùng", icon: UserCog },
   { href: "/admin/categories", label: "Danh mục", icon: FolderOpen },
@@ -128,6 +122,7 @@ const adminNavItems: NavItem[] = [
   { href: "/reports", label: "Báo cáo", icon: BarChart3 },
   { href: "/templates", label: "Templates", icon: Layers },
 ];
+
 
 export default function ModernSidebar({
   role,
@@ -277,7 +272,7 @@ export default function ModernSidebar({
               </>
             ) : (
               // Collapsed admin items
-              adminNavItems.map((item) => (
+              ADMIN_NAV_ITEMS.map((item) => (
                 <NavLink key={item.href} href={item.href} icon={item.icon} isCollapsed={isCollapsed}>
                   {item.label}
                 </NavLink>

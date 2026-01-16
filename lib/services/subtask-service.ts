@@ -185,16 +185,9 @@ export class SubtaskService {
     subtask?: Task;
     error?: string;
   }> {
-    console.log('🔧 Service: createSubtask called with:', options);
-    
     try {
-      // Validate input
-      console.log('🔧 Service: Validating input...');
       const validated = createSubtaskSchema.parse(options);
-      console.log('✅ Service: Validation passed:', validated);
 
-      // Get parent task
-      console.log('🔧 Service: Getting parent task...');
       const parentTask = await prisma.task.findUnique({
         where: { id: validated.parentId },
         include: {
@@ -207,59 +200,37 @@ export class SubtaskService {
       });
 
       if (!parentTask) {
-        console.log('❌ Service: Parent task not found');
         return {
           success: false,
           error: "Parent task không tồn tại",
         };
       }
-      
-      console.log('✅ Service: Parent task found:', {
-        id: parentTask.id,
-        title: parentTask.title,
-        status: parentTask.status,
-        parentTaskId: parentTask.parentTaskId,
-        requestId: parentTask.requestId,
-        assigneeId: parentTask.assigneeId,
-      });
 
-      // Check if subtasks can be added
-      console.log('🔧 Service: Checking if can add subtasks...');
       const canAdd = await this.canAddSubtasks(validated.parentId);
-      console.log('🔧 Service: Can add result:', canAdd);
-      
+
       if (!canAdd.canAdd) {
-        console.log('❌ Service: Cannot add subtasks:', canAdd.reason);
         return {
           success: false,
           error: canAdd.reason || "Không thể tạo subtask",
         };
       }
 
-      // RBAC check: Can user create subtask?
-      console.log('🔧 Service: Checking permissions...');
       const mappedRole = (validated.userRole as unknown as Role);
       const hasPermission = await this.canManageSubtask(
         validated.userId,
         mappedRole,
         parentTask
       );
-      console.log('🔧 Service: Permission result:', hasPermission);
 
       if (!hasPermission) {
-        console.log('❌ Service: No permission to create subtask');
         return {
           success: false,
           error: "Không có quyền tạo subtask",
         };
       }
 
-      // Determine assignee (use provided or inherit from parent)
       const assigneeId = validated.assigneeId || parentTask.assigneeId;
-      console.log('🔧 Service: Assignee ID:', assigneeId);
 
-      // Create subtask
-      console.log('🔧 Service: Creating subtask...');
       const subtask = await prisma.task.create({
         data: {
           title: validated.title,
@@ -271,22 +242,12 @@ export class SubtaskService {
           status: "TODO",
         },
       });
-      
-      console.log('✅ Service: Subtask created:', {
-        id: subtask.id,
-        title: subtask.title,
-        parentTaskId: subtask.parentTaskId,
-        requestId: subtask.requestId,
-        assigneeId: subtask.assigneeId,
-      });
 
-      // Update parent status to WAITING_SUBTASKS
       await prisma.task.update({
         where: { id: validated.parentId },
         data: { status: "WAITING_SUBTASKS" },
       });
 
-      // Create audit log
       await prisma.auditLog.create({
         data: {
           userId: validated.userId,
@@ -299,12 +260,6 @@ export class SubtaskService {
             requestId: parentTask.requestId,
           } as unknown) as Prisma.InputJsonValue,
         },
-      });
-
-      console.log("✅ Subtask created:", {
-        subtaskId: subtask.id,
-        parentId: validated.parentId,
-        title: subtask.title,
       });
 
       return {
@@ -549,7 +504,6 @@ export class SubtaskService {
         });
       }
 
-      // Create audit log
       await prisma.auditLog.create({
         data: {
           userId: validated.userId,
@@ -561,12 +515,6 @@ export class SubtaskService {
             parentTaskId: parentId,
           },
         },
-      });
-
-      console.log("✅ Subtask deleted:", {
-        subtaskId: validated.subtaskId,
-        parentId,
-        title: subtaskTitle,
       });
 
       return { success: true };
@@ -621,16 +569,9 @@ export class SubtaskService {
         updateData.completedAt = new Date();
       }
 
-      // Update parent task
       const updatedTask = await prisma.task.update({
         where: { id: parentId },
         data: updateData,
-      });
-
-      console.log("✅ Parent status updated:", {
-        parentId,
-        status: recommendedStatus,
-        canComplete,
       });
 
       return {

@@ -14,7 +14,7 @@ export default function SignOutPage() {
         
         // Clear all cookies manually
         const cookies = document.cookie.split(";");
-        for (let cookie of cookies) {
+        for (const cookie of cookies) {
           const eqPos = cookie.indexOf("=");
           const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
           

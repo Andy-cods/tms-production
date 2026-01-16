@@ -8,32 +8,55 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
 } from "recharts";
 import { AlertCircle } from "lucide-react";
 import type { CFDData } from "@/lib/services/time-analysis-service";
+import { TooltipCard, TooltipTitle } from "@/components/charts/tooltip-card";
+import { CFD_STATUS_COLORS, CFD_STATUS_LABELS } from "@/lib/constants/dashboard";
 
 interface Props {
   data: CFDData[];
   loading?: boolean;
 }
 
-const STATUS_COLORS = {
-  DONE: '#10b981',        // green
-  IN_REVIEW: '#8b5cf6',   // purple
-  IN_PROGRESS: '#3b82f6', // blue
-  TODO: '#6b7280',        // gray
-  BLOCKED: '#ef4444',     // red
+type CFDTooltipItem = {
+  dataKey: string;
+  color: string;
+  value: number;
 };
 
-const STATUS_LABELS = {
-  DONE: 'Hoàn thành',
-  IN_REVIEW: 'Chờ duyệt',
-  IN_PROGRESS: 'Đang làm',
-  TODO: 'Chưa bắt đầu',
-  BLOCKED: 'Bị chặn',
-};
+function CFDTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: CFDTooltipItem[];
+  label?: string;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  // Recharts payload ordering can be bottom-to-top; show top-to-bottom in tooltip
+  const items = [...payload].reverse();
+
+  return (
+    <TooltipCard>
+      <TooltipTitle>{label}</TooltipTitle>
+      <div className="space-y-1">
+        {items.map((item) => (
+          <p key={item.dataKey} className="text-xs flex items-center gap-2">
+            <span className="w-3 h-3 rounded" style={{ backgroundColor: item.color }} />
+            <span className="font-medium">
+              {CFD_STATUS_LABELS[item.dataKey]}:
+            </span>
+            <span>{item.value}</span>
+          </p>
+        ))}
+      </div>
+    </TooltipCard>
+  );
+}
 
 export function CumulativeFlowDiagram({ data, loading }: Props) {
   const [hiddenStatuses, setHiddenStatuses] = useState<Set<string>>(new Set());
@@ -88,28 +111,6 @@ export function CumulativeFlowDiagram({ data, loading }: Props) {
     setHiddenStatuses(newHidden);
   };
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (!active || !payload || !payload.length) return null;
-    
-    return (
-      <div className="bg-white rounded-lg border shadow-lg p-3">
-        <p className="text-sm font-medium text-gray-900 mb-2">{label}</p>
-        <div className="space-y-1">
-          {payload.reverse().map((item: any) => (
-            <p key={item.dataKey} className="text-xs flex items-center gap-2">
-              <span 
-                className="w-3 h-3 rounded"
-                style={{ backgroundColor: item.color }}
-              />
-              <span className="font-medium">{STATUS_LABELS[item.dataKey as keyof typeof STATUS_LABELS]}:</span>
-              <span>{item.value}</span>
-            </p>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="space-y-4">
       {/* Insights */}
@@ -128,7 +129,7 @@ export function CumulativeFlowDiagram({ data, loading }: Props) {
 
       {/* Legend toggles */}
       <div className="flex flex-wrap gap-2">
-        {Object.entries(STATUS_LABELS).map(([key, label]) => (
+        {Object.entries(CFD_STATUS_LABELS).map(([key, label]) => (
           <button
             key={key}
             onClick={() => toggleStatus(key)}
@@ -139,8 +140,8 @@ export function CumulativeFlowDiagram({ data, loading }: Props) {
             }`}
             style={{
               backgroundColor: hiddenStatuses.has(key) 
-                ? undefined 
-                : STATUS_COLORS[key as keyof typeof STATUS_COLORS],
+                ? undefined
+                : CFD_STATUS_COLORS[key],
             }}
           >
             {label}
@@ -160,15 +161,15 @@ export function CumulativeFlowDiagram({ data, loading }: Props) {
             tick={{ fontSize: 12 }}
             label={{ value: 'Số lượng', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }}
           />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<CFDTooltip />} />
           
           {!hiddenStatuses.has('DONE') && (
             <Area 
               type="monotone"
               dataKey="DONE" 
               stackId="1"
-              stroke={STATUS_COLORS.DONE}
-              fill={STATUS_COLORS.DONE}
+              stroke={CFD_STATUS_COLORS.DONE}
+              fill={CFD_STATUS_COLORS.DONE}
               fillOpacity={0.8}
             />
           )}
@@ -177,8 +178,8 @@ export function CumulativeFlowDiagram({ data, loading }: Props) {
               type="monotone"
               dataKey="IN_REVIEW" 
               stackId="1"
-              stroke={STATUS_COLORS.IN_REVIEW}
-              fill={STATUS_COLORS.IN_REVIEW}
+              stroke={CFD_STATUS_COLORS.IN_REVIEW}
+              fill={CFD_STATUS_COLORS.IN_REVIEW}
               fillOpacity={0.8}
             />
           )}
@@ -187,8 +188,8 @@ export function CumulativeFlowDiagram({ data, loading }: Props) {
               type="monotone"
               dataKey="IN_PROGRESS" 
               stackId="1"
-              stroke={STATUS_COLORS.IN_PROGRESS}
-              fill={STATUS_COLORS.IN_PROGRESS}
+              stroke={CFD_STATUS_COLORS.IN_PROGRESS}
+              fill={CFD_STATUS_COLORS.IN_PROGRESS}
               fillOpacity={0.8}
             />
           )}
@@ -197,8 +198,8 @@ export function CumulativeFlowDiagram({ data, loading }: Props) {
               type="monotone"
               dataKey="TODO" 
               stackId="1"
-              stroke={STATUS_COLORS.TODO}
-              fill={STATUS_COLORS.TODO}
+              stroke={CFD_STATUS_COLORS.TODO}
+              fill={CFD_STATUS_COLORS.TODO}
               fillOpacity={0.8}
             />
           )}
@@ -207,8 +208,8 @@ export function CumulativeFlowDiagram({ data, loading }: Props) {
               type="monotone"
               dataKey="BLOCKED" 
               stackId="1"
-              stroke={STATUS_COLORS.BLOCKED}
-              fill={STATUS_COLORS.BLOCKED}
+              stroke={CFD_STATUS_COLORS.BLOCKED}
+              fill={CFD_STATUS_COLORS.BLOCKED}
               fillOpacity={0.8}
             />
           )}

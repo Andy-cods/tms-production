@@ -12,6 +12,8 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { CycleTimeData } from "@/lib/services/performance-service";
+import { TooltipCard, TooltipTitle } from "@/components/charts/tooltip-card";
+import { PRIORITY_COLORS } from "@/lib/constants/dashboard";
 
 interface Props {
   data: CycleTimeData[];
@@ -19,12 +21,48 @@ interface Props {
   loading?: boolean;
 }
 
-const PRIORITY_COLORS = {
-  URGENT: '#ef4444',   // red-500
-  HIGH: '#f97316',     // orange-500
-  MEDIUM: '#3b82f6',   // blue-500
-  LOW: '#9ca3af',      // gray-400
+type CycleTimeTooltipItem = {
+  dataKey: string;
+  name: string;
+  color: string;
+  value: number;
+  payload: { period: string };
 };
+
+function CycleTimeTooltip({
+  active,
+  payload,
+  showBreakdown,
+}: {
+  active?: boolean;
+  payload?: CycleTimeTooltipItem[];
+  showBreakdown: boolean;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const period = payload[0]?.payload?.period;
+
+  return (
+    <TooltipCard>
+      <TooltipTitle>{period}</TooltipTitle>
+      {showBreakdown ? (
+        <div className="space-y-1">
+          {payload.map((item) => (
+            <p key={item.dataKey} className="text-xs" style={{ color: item.color }}>
+              <span className="font-medium">{item.name}:</span>{" "}
+              {item.value.toFixed(1)} ngày
+            </p>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-gray-700">
+          Trung bình:{" "}
+          <span className="font-medium">{payload[0].value.toFixed(1)} ngày</span>
+        </p>
+      )}
+    </TooltipCard>
+  );
+}
 
 export function CycleTimeTrend({ data, showBreakdown: initialShowBreakdown = false, loading }: Props) {
   const [showBreakdown, setShowBreakdown] = useState(initialShowBreakdown);
@@ -44,31 +82,6 @@ export function CycleTimeTrend({ data, showBreakdown: initialShowBreakdown = fal
       </div>
     );
   }
-
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (!active || !payload || !payload.length) return null;
-    
-    return (
-      <div className="bg-white rounded-lg border shadow-lg p-3">
-        <p className="text-sm font-medium text-gray-900 mb-2">
-          {payload[0].payload.period}
-        </p>
-        {showBreakdown ? (
-          <div className="space-y-1">
-            {payload.map((item: any) => (
-              <p key={item.dataKey} className="text-xs" style={{ color: item.color }}>
-                <span className="font-medium">{item.name}:</span> {item.value.toFixed(1)} ngày
-              </p>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-gray-700">
-            Trung bình: <span className="font-medium">{payload[0].value.toFixed(1)} ngày</span>
-          </p>
-        )}
-      </div>
-    );
-  };
 
   // Calculate trend
   const trend = data.length >= 2 ? 
@@ -120,7 +133,7 @@ export function CycleTimeTrend({ data, showBreakdown: initialShowBreakdown = fal
             tick={{ fontSize: 12 }}
             label={{ value: 'Ngày', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }}
           />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<CycleTimeTooltip showBreakdown={showBreakdown} />} />
           <Legend 
             wrapperStyle={{ fontSize: 12 }}
             iconType="line"

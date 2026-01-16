@@ -6,6 +6,7 @@ import { UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ModernUserTable } from "./_components/ModernUserTable";
 import { AdminUsersClient } from "./_components/AdminUsersClient";
+import { decryptPII } from "@/lib/security/crypto";
 
 export default async function AdminUsersPage({
   searchParams,
@@ -74,6 +75,11 @@ export default async function AdminUsersPage({
       createdAt: "desc",
     },
   });
+  const decryptedUsers = users.map((user) => ({
+    ...user,
+    phone: decryptPII(user.phone ?? null),
+    telegramUsername: decryptPII(user.telegramUsername ?? null),
+  }));
 
   // Fetch teams for dropdown
   const teams = await prisma.team.findMany({
@@ -91,7 +97,7 @@ export default async function AdminUsersPage({
 
   return (
     <AdminUsersClient
-      users={users}
+      users={decryptedUsers}
       teams={teams}
       positions={positions}
       initialSearch={search}

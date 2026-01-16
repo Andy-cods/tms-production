@@ -11,9 +11,9 @@ import {
   Legend,
   ResponsiveContainer,
   ReferenceLine,
-  Dot,
 } from "recharts";
 import type { ChartDataPoint } from "@/types/dashboard";
+import { TooltipCard } from "@/components/charts/tooltip-card";
 
 interface Props {
   data: ChartDataPoint[];
@@ -21,6 +21,69 @@ interface Props {
   loading?: boolean;
   title?: string;
   subtitle?: string;
+}
+
+type CompletionRateDotPayload = { value: number };
+
+function CompletionRateDot({
+  cx,
+  cy,
+  payload,
+  min,
+  max,
+}: {
+  cx?: number;
+  cy?: number;
+  payload?: CompletionRateDotPayload;
+  min: number;
+  max: number;
+}) {
+  if (!cx || !cy || !payload) return null;
+
+  const isMin = payload.value === min;
+  const isMax = payload.value === max;
+
+  if (isMin || isMax) {
+    return (
+      <circle
+        cx={cx}
+        cy={cy}
+        r={5}
+        fill={isMax ? "#52B26B" : "#EF4444"}
+        stroke="white"
+        strokeWidth={2}
+      />
+    );
+  }
+
+  return (
+    <circle cx={cx} cy={cy} r={4} fill="#52B26B" stroke="white" strokeWidth={2} />
+  );
+}
+
+type CompletionRateTooltipItem = {
+  value: number;
+  payload: { label: string };
+};
+
+function CompletionRateTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: CompletionRateTooltipItem[];
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const item = payload[0];
+  return (
+    <TooltipCard className="rounded-xl border-gray-200">
+      <p className="text-sm font-medium text-dark-900">{item.payload.label}</p>
+      <p className="text-sm text-primary-600 font-semibold mt-1">
+        {item.value.toFixed(1)}% hoàn thành
+      </p>
+    </TooltipCard>
+  );
 }
 
 export function CompletionRateChart({ 
@@ -77,51 +140,6 @@ export function CompletionRateChart({
     );
   }
 
-  // Custom dot for min/max points
-  const CustomDot = (props: any) => {
-    const { cx, cy, payload } = props;
-    const isMin = payload.value === stats.min;
-    const isMax = payload.value === stats.max;
-    
-    if (isMin || isMax) {
-      return (
-        <circle
-          cx={cx}
-          cy={cy}
-          r={5}
-          fill={isMax ? '#52B26B' : '#EF4444'}
-          stroke="white"
-          strokeWidth={2}
-        />
-      );
-    }
-    return (
-      <circle
-        cx={cx}
-        cy={cy}
-        r={4}
-        fill="#52B26B"
-        stroke="white"
-        strokeWidth={2}
-      />
-    );
-  };
-
-  // Custom tooltip
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (!active || !payload || !payload.length) return null;
-    
-    const data = payload[0];
-    return (
-      <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-3">
-        <p className="text-sm font-medium text-dark-900">{data.payload.label}</p>
-        <p className="text-sm text-primary-600 font-semibold mt-1">
-          {data.value.toFixed(1)}% hoàn thành
-        </p>
-      </div>
-    );
-  };
-
   const periodLabel = {
     week: '7 ngày qua',
     month: '30 ngày qua',
@@ -161,7 +179,7 @@ export function CompletionRateChart({
             label={{ value: 'Tỷ lệ (%)', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: "#6B7280" } }}
             stroke="#D1D5DB"
           />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<CompletionRateTooltip />} />
           <Legend 
             wrapperStyle={{ fontSize: 12 }}
             iconType="line"
@@ -189,7 +207,7 @@ export function CompletionRateChart({
             stroke="#52B26B" 
             strokeWidth={3}
             name="Tỷ lệ hoàn thành"
-            dot={<CustomDot />}
+            dot={<CompletionRateDot min={stats.min} max={stats.max} />}
             activeDot={{ r: 6, fill: "#52B26B", stroke: "#fff", strokeWidth: 2 }}
           />
         </LineChart>

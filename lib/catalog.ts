@@ -745,5 +745,3 @@ export function computeFixedDeadline(rule: CatalogRule, now: Date = new Date()):
   base.setHours(base.getHours() + 24);
   return base;
 }
-
-

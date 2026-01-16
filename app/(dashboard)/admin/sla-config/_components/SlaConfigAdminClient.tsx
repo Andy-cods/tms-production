@@ -17,6 +17,78 @@ type SlaConfig = {
 	updatedAt: string | Date;
 };
 
+function SlaConfigTable({
+	list,
+	isBusy,
+	onToggle,
+	onEdit,
+	renderPriorityCell,
+	renderCategoryCell,
+}: {
+	list: SlaConfig[];
+	isBusy: (id: string) => boolean;
+	onToggle: (cfg: SlaConfig, checked: boolean) => Promise<void>;
+	onEdit: (cfg: SlaConfig) => void;
+	renderPriorityCell: (priority: SlaConfig["priority"]) => React.ReactNode;
+	renderCategoryCell: (category: SlaConfig["category"]) => React.ReactNode;
+}) {
+	return (
+		<div className="rounded border bg-white overflow-x-auto">
+			<table className="w-full text-sm">
+				<thead className="bg-gray-50">
+					<tr>
+						<th className="px-3 py-2 text-left">Tên quy tắc</th>
+						<th className="px-3 py-2 text-left">Áp dụng</th>
+						<th className="px-3 py-2 text-left">Thời gian mục tiêu (giờ)</th>
+						<th className="px-3 py-2 text-left">Trạng thái</th>
+						<th className="px-3 py-2 text-left">Hành động</th>
+					</tr>
+				</thead>
+				<tbody>
+					{list.map((c) => (
+						<tr key={c.id} className="border-t">
+							<td className="px-3 py-2">{c.name}</td>
+							<td className="px-3 py-2">
+								<div className="flex items-center gap-2">
+									{renderPriorityCell({} as any)}
+									{renderCategoryCell({} as any)}
+								</div>
+							</td>
+							<td className="px-3 py-2">{c.targetHours}</td>
+							<td className="px-3 py-2">
+								<label className="inline-flex items-center gap-2 text-xs">
+									<input
+										type="checkbox"
+										checked={c.isActive}
+										disabled={isBusy(c.id)}
+										onChange={(e) => void onToggle(c, e.target.checked)}
+									/>
+									<span>{c.isActive ? "Hoạt động" : "Tạm dừng"}</span>
+								</label>
+							</td>
+							<td className="px-3 py-2">
+								<button
+									className="px-2 py-1 border rounded text-xs mr-2"
+									onClick={() => onEdit(c)}
+								>
+									Sửa
+								</button>
+							</td>
+						</tr>
+					))}
+					{list.length === 0 && (
+						<tr>
+							<td className="px-3 py-6 text-center text-gray-500" colSpan={5}>
+								Không có quy tắc
+							</td>
+						</tr>
+					)}
+				</tbody>
+			</table>
+		</div>
+	);
+}
+
 export function SlaConfigAdminClient({ configs, categories }: { configs: SlaConfig[]; categories: { id: string; name: string }[] }) {
 	const toast = useToast();
 	const [editing, setEditing] = useState<SlaConfig | null>(null);
@@ -48,52 +120,6 @@ export function SlaConfigAdminClient({ configs, categories }: { configs: SlaConf
 		return <span>{c}</span>;
 	}
 
-	function Table({ list }: { list: SlaConfig[] }) {
-		return (
-			<div className="rounded border bg-white overflow-x-auto">
-				<table className="w-full text-sm">
-					<thead className="bg-gray-50">
-						<tr>
-							<th className="px-3 py-2 text-left">Tên quy tắc</th>
-							<th className="px-3 py-2 text-left">Áp dụng</th>
-							<th className="px-3 py-2 text-left">Thời gian mục tiêu (giờ)</th>
-							<th className="px-3 py-2 text-left">Trạng thái</th>
-							<th className="px-3 py-2 text-left">Hành động</th>
-						</tr>
-					</thead>
-					<tbody>
-						{list.map((c) => (
-							<tr key={c.id} className="border-t">
-								<td className="px-3 py-2">{c.name}</td>
-								<td className="px-3 py-2">
-									<div className="flex items-center gap-2">
-										<PriorityCell {...({} as any)} />
-										<CategoryCell {...({} as any)} />
-									</div>
-								</td>
-								<td className="px-3 py-2">{c.targetHours}</td>
-								<td className="px-3 py-2">
-									<label className="inline-flex items-center gap-2 text-xs">
-										<input type="checkbox" checked={c.isActive} disabled={busy === c.id} onChange={(e) => onToggle(c, e.target.checked)} />
-										<span>{c.isActive ? "Hoạt động" : "Tạm dừng"}</span>
-									</label>
-								</td>
-								<td className="px-3 py-2">
-									<button className="px-2 py-1 border rounded text-xs mr-2" onClick={() => setEditing(c)}>Sửa</button>
-								</td>
-							</tr>
-						))}
-						{list.length === 0 && (
-							<tr>
-								<td className="px-3 py-6 text-center text-gray-500" colSpan={5}>Không có quy tắc</td>
-							</tr>
-						)}
-					</tbody>
-				</table>
-			</div>
-		);
-	}
-
 	return (
 		<div className="p-6 max-w-6xl mx-auto space-y-6">
 			<div>
@@ -110,10 +136,24 @@ export function SlaConfigAdminClient({ configs, categories }: { configs: SlaConf
 			</div>
 
 			{/* Request tab */}
-			<Table list={byEntity.REQUEST} />
+			<SlaConfigTable
+				list={byEntity.REQUEST}
+				isBusy={(id) => busy === id}
+				onToggle={onToggle}
+				onEdit={setEditing}
+				renderPriorityCell={PriorityCell}
+				renderCategoryCell={CategoryCell}
+			/>
 
 			{/* Task tab */}
-			<Table list={byEntity.TASK} />
+			<SlaConfigTable
+				list={byEntity.TASK}
+				isBusy={(id) => busy === id}
+				onToggle={onToggle}
+				onEdit={setEditing}
+				renderPriorityCell={PriorityCell}
+				renderCategoryCell={CategoryCell}
+			/>
 		</div>
 	);
 }

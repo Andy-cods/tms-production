@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { getCategoryBreadcrumb } from "@/actions/category";
 
@@ -18,23 +18,24 @@ export function CategoryBreadcrumb({
   >([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (categoryId) {
-      loadBreadcrumb();
-    } else {
-      setBreadcrumb([]);
-      setLoading(false);
-    }
-  }, [categoryId]);
-
-  async function loadBreadcrumb() {
+  const loadBreadcrumb = useCallback(async () => {
     setLoading(true);
     const result = await getCategoryBreadcrumb(categoryId);
     if (result.success && result.breadcrumb) {
       setBreadcrumb(result.breadcrumb);
     }
     setLoading(false);
-  }
+  }, [categoryId]);
+
+  useEffect(() => {
+    if (categoryId) {
+      void loadBreadcrumb();
+      return;
+    }
+
+    setBreadcrumb([]);
+    setLoading(false);
+  }, [categoryId, loadBreadcrumb]);
 
   if (loading) {
     return (

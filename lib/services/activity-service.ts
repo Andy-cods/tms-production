@@ -184,4 +184,3 @@ export function formatActivityText(activity: Activity): string {
   const action = actionMap[type] || 'thực hiện hành động';
   return `${user.name} ${action} "${entity.title}"`;
 }
-

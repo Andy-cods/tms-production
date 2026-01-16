@@ -120,5 +120,3 @@ export async function createTaskComment(input: { taskId: string; content: string
     revalidatePath(`/requests/${task.request.id}`);
   }
 }
-
-

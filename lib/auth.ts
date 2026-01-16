@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import os from "os";
+import { decryptPII } from "@/lib/security/crypto";
+import { verifyTwoFactorToken } from "@/lib/security/two-factor";
 
 function resolveBaseUrl() {
   const fromEnv =
@@ -101,15 +103,30 @@ const COOKIE_SECURE = APP_URL_OBJECT?.protocol === "https:";
 // Don't use __Host- or __Secure- prefix when not using HTTPS
 const USE_SECURE_PREFIX = COOKIE_SECURE;
 
+const SESSION_MAX_AGE =
+  (Number(process.env.AUTH_SESSION_MAX_AGE_MINUTES) || 30) * 60;
+const SESSION_UPDATE_AGE =
+  (Number(process.env.AUTH_SESSION_UPDATE_AGE_MINUTES) || 5) * 60;
+const MAX_FAILED_LOGINS = Number(process.env.AUTH_LOCKOUT_THRESHOLD) || 5;
+const LOCKOUT_MINUTES = Number(process.env.AUTH_LOCKOUT_MINUTES) || 15;
+
 /** Validate input của Credentials */
 const credSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  otp: z.string().optional(),
 });
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: PrismaAdapter(prisma),
-  session: { strategy: "jwt" },
+  session: {
+    strategy: "jwt",
+    maxAge: SESSION_MAX_AGE,
+    updateAge: SESSION_UPDATE_AGE,
+  },
+  jwt: {
+    maxAge: SESSION_MAX_AGE,
+  },
   trustHost: true,
   cookies: {
     sessionToken: {
@@ -122,6 +139,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         path: "/",
         secure: COOKIE_SECURE,
         domain: COOKIE_DOMAIN,
+        maxAge: SESSION_MAX_AGE,
       },
     },
     callbackUrl: {
@@ -179,9 +197,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        otp: { label: "2FA Code", type: "text" },
       },
       async authorize(raw) {
-        const { email, password } = credSchema.parse(raw);
+        const { email, password, otp } = credSchema.parse(raw);
 
         const user = await prisma.user.findUnique({ 
           where: { email },
@@ -192,12 +211,67 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             role: true,
             password: true,
             permissionTickets: true,
+            failedLoginAttempts: true,
+            lockoutUntil: true,
+            twoFactorEnabled: true,
+            twoFactorSecret: true,
           },
         });
         if (!user || !user.password) return null;
 
+        const now = new Date();
+        if (user.lockoutUntil && user.lockoutUntil > now) {
+          throw new Error("ACCOUNT_LOCKED");
+        }
+
         const ok = await bcrypt.compare(password, user.password);
-        if (!ok) return null;
+        if (!ok) {
+          const failedCount = (user.failedLoginAttempts ?? 0) + 1;
+          const lockoutUntil =
+            failedCount >= MAX_FAILED_LOGINS
+              ? new Date(now.getTime() + LOCKOUT_MINUTES * 60 * 1000)
+              : null;
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              failedLoginAttempts: failedCount,
+              lockoutUntil,
+            },
+          });
+          return null;
+        }
+
+        if (user.twoFactorEnabled) {
+          if (!otp) {
+            throw new Error("TWO_FACTOR_REQUIRED");
+          }
+          const secret = decryptPII(user.twoFactorSecret || "");
+          if (!secret || !verifyTwoFactorToken(secret, otp)) {
+            const failedCount = (user.failedLoginAttempts ?? 0) + 1;
+            const lockoutUntil =
+              failedCount >= MAX_FAILED_LOGINS
+                ? new Date(now.getTime() + LOCKOUT_MINUTES * 60 * 1000)
+                : null;
+            await prisma.user.update({
+              where: { id: user.id },
+              data: {
+                failedLoginAttempts: failedCount,
+                lockoutUntil,
+              },
+            });
+            return null;
+          }
+        }
+
+        if (user.failedLoginAttempts || user.lockoutUntil) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              failedLoginAttempts: 0,
+              lockoutUntil: null,
+            },
+          });
+        }
 
         // Trả về các field muốn nhúng vào JWT lần đầu
         return {

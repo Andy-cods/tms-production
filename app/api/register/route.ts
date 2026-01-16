@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { passwordSchema } from "@/lib/validations/password";
 
 const bodySchema = z.object({
   email: z.string().email(),
   name: z.string().min(2).max(80),
-  password: z.string().min(6),
+  password: passwordSchema,
 });
 
 export async function POST(req: Request) {

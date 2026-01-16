@@ -68,19 +68,56 @@ export const DATE_RANGE_PRESETS = {
 
 // Priority colors for charts
 export const PRIORITY_COLORS = {
-  LOW: '#94a3b8',      // slate-400
+  LOW: '#9ca3af',      // gray-400
   MEDIUM: '#3b82f6',   // blue-500
   HIGH: '#f97316',     // orange-500
   URGENT: '#ef4444',   // red-500
 };
 
-// Status colors for charts
-export const STATUS_COLORS = {
-  OPEN: '#3b82f6',         // blue-500
-  IN_PROGRESS: '#eab308',  // yellow-500
-  IN_REVIEW: '#a855f7',    // purple-500
-  DONE: '#22c55e',         // green-500
-  REJECTED: '#ef4444',     // red-500
-  ARCHIVED: '#6b7280',     // gray-500
+export const PRIORITY_EMOJIS: Record<keyof typeof PRIORITY_COLORS, string> = {
+  LOW: "🔵",
+  MEDIUM: "🟡",
+  HIGH: "🟠",
+  URGENT: "🔴",
+};
+
+export function getPriorityEmoji(priority: string | null | undefined) {
+  if (!priority) return "";
+  return PRIORITY_EMOJIS[priority as keyof typeof PRIORITY_EMOJIS] ?? "";
+}
+
+// Task/workload status colors for charts (workload distribution pie)
+export const TASK_STATUS_COLORS: Record<string, string> = {
+  TODO: "#9CA3AF", // gray-400
+  IN_PROGRESS: "#FF872E", // accent-500 (orange)
+  IN_REVIEW: "#3B82F6", // blue-500
+  BLOCKED: "#EF4444", // red-500
+  DONE: "#52B26B", // primary-500 (green)
+  REWORK: "#F59E0B", // amber-500
+};
+
+export const TASK_STATUS_LABELS: Record<string, string> = {
+  TODO: "Chưa bắt đầu",
+  IN_PROGRESS: "Đang làm",
+  IN_REVIEW: "Chờ duyệt",
+  BLOCKED: "Bị chặn",
+  DONE: "Hoàn thành",
+};
+
+// Cumulative Flow Diagram palette (keep exact existing hues for this chart)
+export const CFD_STATUS_COLORS: Record<string, string> = {
+  DONE: "#10b981", // green
+  IN_REVIEW: "#8b5cf6", // purple
+  IN_PROGRESS: "#3b82f6", // blue
+  TODO: "#6b7280", // gray
+  BLOCKED: "#ef4444", // red
+};
+
+export const CFD_STATUS_LABELS: Record<string, string> = {
+  DONE: "Hoàn thành",
+  IN_REVIEW: "Chờ duyệt",
+  IN_PROGRESS: "Đang làm",
+  TODO: "Chưa bắt đầu",
+  BLOCKED: "Bị chặn",
 };
 

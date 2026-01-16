@@ -15,18 +15,52 @@ import {
   LabelList,
 } from "recharts";
 import type { SLAComplianceByPriority } from "@/lib/services/chart-service";
+import { TooltipCard, TooltipTitle } from "@/components/charts/tooltip-card";
+import { getPriorityEmoji } from "@/lib/constants/dashboard";
+import { formatPercent } from "@/components/charts/recharts-formatters";
 
 interface Props {
   data: SLAComplianceByPriority[];
   loading?: boolean;
 }
 
-const priorityEmojis: Record<string, string> = {
-  LOW: '🔵',
-  MEDIUM: '🟡',
-  HIGH: '🟠',
-  URGENT: '🔴',
+type SLAComplianceTooltipItem = {
+  payload: SLAComplianceByPriority & { priorityLabel: string };
 };
+
+function SLAComplianceTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: SLAComplianceTooltipItem[];
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const item = payload[0]?.payload;
+  if (!item) return null;
+
+  return (
+    <TooltipCard className="rounded-xl border-gray-200">
+      <TooltipTitle className="text-dark-900 mb-2">
+        {getPriorityEmoji(item.priority)} {item.priority}
+      </TooltipTitle>
+      <p className="text-sm text-primary-600 font-semibold">
+        <span className="font-medium">Tuân thủ:</span> {item.compliance.toFixed(1)}%
+      </p>
+      <p className="text-sm text-gray-600">
+        Đúng hạn: {item.onTime} / {item.total}
+      </p>
+    </TooltipCard>
+  );
+}
+
+function getComplianceTextColor(compliance: number) {
+  if (compliance >= 90) return "text-green-600";
+  if (compliance >= 80) return "text-amber-600";
+  if (compliance >= 70) return "text-orange-600";
+  return "text-red-600";
+}
 
 function getBarColor(compliance: number): string {
   if (compliance >= 90) return '#52B26B'; // primary-500 (green)
@@ -66,27 +100,8 @@ export function SLAComplianceChart({ data, loading }: Props) {
   // Enhance data with emoji labels
   const chartData = data.map(item => ({
     ...item,
-    priorityLabel: `${priorityEmojis[item.priority] || ''} ${item.priority}`,
+    priorityLabel: `${getPriorityEmoji(item.priority)} ${item.priority}`,
   }));
-
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (!active || !payload || !payload.length) return null;
-    
-    const data = payload[0].payload;
-    return (
-      <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-3">
-        <p className="text-sm font-medium text-dark-900 mb-2">
-          {priorityEmojis[data.priority]} {data.priority}
-        </p>
-        <p className="text-sm text-primary-600 font-semibold">
-          <span className="font-medium">Tuân thủ:</span> {data.compliance.toFixed(1)}%
-        </p>
-        <p className="text-sm text-gray-600">
-          Đúng hạn: {data.onTime} / {data.total}
-        </p>
-      </div>
-    );
-  };
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -111,7 +126,7 @@ export function SLAComplianceChart({ data, loading }: Props) {
             label={{ value: 'Tuân thủ (%)', angle: -90, position: 'insideLeft', style: { fontSize: 12, fill: "#6B7280" } }}
             stroke="#D1D5DB"
           />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<SLAComplianceTooltip />} />
           <Legend 
             wrapperStyle={{ fontSize: 12 }}
           />
@@ -131,7 +146,7 @@ export function SLAComplianceChart({ data, loading }: Props) {
             <LabelList 
               dataKey="compliance" 
               position="top" 
-              formatter={(value: any) => `${Number(value).toFixed(1)}%`}
+              formatter={(value: unknown) => formatPercent(value, 1)}
               style={{ fontSize: 11, fill: '#374151' }}
             />
             {chartData.map((entry, index) => (
@@ -146,14 +161,9 @@ export function SLAComplianceChart({ data, loading }: Props) {
         {data.map((item) => (
           <div key={item.priority} className="flex items-center justify-between">
             <span className="text-gray-600">
-              {priorityEmojis[item.priority]} {item.priority}:
+              {getPriorityEmoji(item.priority)} {item.priority}:
             </span>
-            <span className={`font-medium ${
-              item.compliance >= 90 ? 'text-green-600' :
-              item.compliance >= 80 ? 'text-amber-600' :
-              item.compliance >= 70 ? 'text-orange-600' :
-              'text-red-600'
-            }`}>
+            <span className={`font-medium ${getComplianceTextColor(item.compliance)}`}>
               {item.onTime}/{item.total}
             </span>
           </div>

@@ -13,11 +13,38 @@ import {
   LabelList,
 } from "recharts";
 import type { AgingData } from "@/lib/services/time-analysis-service";
+import { TooltipCard } from "@/components/charts/tooltip-card";
+import { formatPercent } from "@/components/charts/recharts-formatters";
 
 interface Props {
   data: AgingData[];
   loading?: boolean;
   onRangeClick?: (range: string) => void;
+}
+
+type AgingTooltipItem = { payload: AgingData };
+
+function AgingTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: AgingTooltipItem[];
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const item = payload[0]?.payload;
+  if (!item) return null;
+
+  return (
+    <TooltipCard>
+      <p className="text-sm font-medium text-gray-900 mb-1">{item.range}</p>
+      <p className="text-sm text-gray-700">
+        Số lượng: <span className="font-medium">{item.count}</span>
+      </p>
+      <p className="text-xs text-gray-600">Tỷ lệ: {item.percentage}%</p>
+    </TooltipCard>
+  );
 }
 
 function getAgeColor(range: string): string {
@@ -46,25 +73,6 @@ export function AgingReport({ data, loading, onRangeClick }: Props) {
 
   const totalActive = data.reduce((sum, item) => sum + item.count, 0);
   const criticalCount = data.find(d => d.range.includes('>14'))?.count || 0;
-
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (!active || !payload || !payload.length) return null;
-    
-    const item = payload[0].payload;
-    return (
-      <div className="bg-white rounded-lg border shadow-lg p-3">
-        <p className="text-sm font-medium text-gray-900 mb-1">
-          {item.range}
-        </p>
-        <p className="text-sm text-gray-700">
-          Số lượng: <span className="font-medium">{item.count}</span>
-        </p>
-        <p className="text-xs text-gray-600">
-          Tỷ lệ: {item.percentage}%
-        </p>
-      </div>
-    );
-  };
 
   return (
     <div className="space-y-4">
@@ -97,7 +105,7 @@ export function AgingReport({ data, loading, onRangeClick }: Props) {
             tick={{ fontSize: 12 }}
             width={75}
           />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<AgingTooltip />} />
           
           <Bar 
             dataKey="count" 
@@ -108,7 +116,7 @@ export function AgingReport({ data, loading, onRangeClick }: Props) {
             <LabelList 
               dataKey="percentage" 
               position="right" 
-              formatter={(value: any) => `${Number(value).toFixed(0)}%`}
+              formatter={(value: unknown) => formatPercent(value, 0)}
               style={{ fontSize: 11, fill: '#6b7280' }}
             />
             {data.map((entry, index) => (

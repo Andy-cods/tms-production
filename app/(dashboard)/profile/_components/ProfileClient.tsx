@@ -9,11 +9,24 @@ import { PetAdoptionDialog } from "@/components/gamification/pet-adoption-dialog
 import { PetDisplay } from "@/components/gamification/pet-display";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useRouter } from "next/navigation";
 
 export function ProfileClient({ user }: any) {
   const router = useRouter();
   const [petDialogOpen, setPetDialogOpen] = useState(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(
+    Boolean(user?.twoFactorEnabled)
+  );
+  const [twoFactorSetup, setTwoFactorSetup] = useState<{
+    secret: string;
+    otpauthUrl: string;
+  } | null>(null);
+  const [twoFactorToken, setTwoFactorToken] = useState("");
+  const [twoFactorMessage, setTwoFactorMessage] = useState<string | null>(null);
+  const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
+  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
   const stats = user.stats;
 
   if (!stats) {
@@ -41,6 +54,84 @@ export function ProfileClient({ user }: any) {
     mouth: "smile",
     accessory: null,
     background: "blue",
+  };
+
+  const handleTwoFactorSetup = async () => {
+    setTwoFactorError(null);
+    setTwoFactorMessage(null);
+    setTwoFactorLoading(true);
+    try {
+      const res = await fetch("/api/2fa/setup", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.message || "Không thể khởi tạo 2FA");
+      }
+      setTwoFactorSetup({ secret: data.secret, otpauthUrl: data.otpauthUrl });
+      setTwoFactorMessage("Đã tạo secret. Nhập mã từ Authenticator để kích hoạt.");
+    } catch (error: any) {
+      setTwoFactorError(error.message || "Không thể khởi tạo 2FA");
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const handleTwoFactorVerify = async () => {
+    setTwoFactorError(null);
+    setTwoFactorMessage(null);
+    setTwoFactorLoading(true);
+    try {
+      const res = await fetch("/api/2fa/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: twoFactorToken }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.message || "Mã 2FA không hợp lệ");
+      }
+      setTwoFactorEnabled(true);
+      setTwoFactorSetup(null);
+      setTwoFactorToken("");
+      setTwoFactorMessage("Đã bật 2FA thành công.");
+    } catch (error: any) {
+      setTwoFactorError(error.message || "Không thể xác minh 2FA");
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const handleTwoFactorDisable = async () => {
+    setTwoFactorError(null);
+    setTwoFactorMessage(null);
+    setTwoFactorLoading(true);
+    try {
+      const res = await fetch("/api/2fa/disable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: twoFactorToken }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.message || "Mã 2FA không hợp lệ");
+      }
+      setTwoFactorEnabled(false);
+      setTwoFactorSetup(null);
+      setTwoFactorToken("");
+      setTwoFactorMessage("Đã tắt 2FA.");
+    } catch (error: any) {
+      setTwoFactorError(error.message || "Không thể tắt 2FA");
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const handleTwoFactorToggle = () => {
+    if (!twoFactorEnabled) {
+      handleTwoFactorSetup();
+      return;
+    }
+    setTwoFactorMessage("Nhập mã 2FA để tắt.");
+    setTwoFactorError(null);
   };
 
   return (
@@ -181,6 +272,70 @@ export function ProfileClient({ user }: any) {
                 <InfoRow label="Email" value={user.email} />
                 <InfoRow label="Vai trò" value={user.role} />
                 <InfoRow label="Team" value={user.team?.name || "Chưa có"} />
+
+                <div className="pt-4 border-t space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Xác thực 2 bước (2FA)</p>
+                      <p className="text-xs text-gray-500">
+                        Trạng thái: {twoFactorEnabled ? "Đang bật" : "Đang tắt"}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={handleTwoFactorToggle}
+                      disabled={twoFactorLoading}
+                    >
+                      {twoFactorEnabled ? "Tắt 2FA" : "Bật 2FA"}
+                    </Button>
+                  </div>
+
+                  {twoFactorSetup && (
+                    <div className="rounded-md border p-3 bg-gray-50 space-y-2">
+                      <p className="text-sm text-gray-700">
+                        Secret: <span className="font-mono">{twoFactorSetup.secret}</span>
+                      </p>
+                      <p className="text-xs text-gray-500 break-all">
+                        OTPAuth URL: {twoFactorSetup.otpauthUrl}
+                      </p>
+                    </div>
+                  )}
+
+                  {(twoFactorSetup || twoFactorEnabled) && (
+                    <div className="space-y-2">
+                      <Label htmlFor="twoFactorToken">Nhập mã 2FA</Label>
+                      <Input
+                        id="twoFactorToken"
+                        value={twoFactorToken}
+                        onChange={(e) => setTwoFactorToken(e.target.value)}
+                        placeholder="123456"
+                      />
+                      <div className="flex gap-2">
+                        {twoFactorSetup && (
+                          <Button onClick={handleTwoFactorVerify} disabled={twoFactorLoading}>
+                            Xác minh 2FA
+                          </Button>
+                        )}
+                        {twoFactorEnabled && (
+                          <Button
+                            variant="outline"
+                            onClick={handleTwoFactorDisable}
+                            disabled={twoFactorLoading}
+                          >
+                            Tắt 2FA bằng mã
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {twoFactorMessage && (
+                    <p className="text-sm text-green-600">{twoFactorMessage}</p>
+                  )}
+                  {twoFactorError && (
+                    <p className="text-sm text-red-600">{twoFactorError}</p>
+                  )}
+                </div>
 
                 <div className="flex gap-3 pt-4 border-t">
                   <Button variant="outline">Đổi mật khẩu</Button>

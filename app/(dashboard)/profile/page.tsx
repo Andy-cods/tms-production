@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ProfileClient } from "./_components/ProfileClient";
+import { decryptPII } from "@/lib/security/crypto";
 
 export default async function ProfilePage() {
   const session = await auth();
@@ -15,7 +16,14 @@ export default async function ProfilePage() {
   // Get user with stats
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      phone: true,
+      telegramUsername: true,
+      twoFactorEnabled: true,
       team: {
         select: {
           id: true,
@@ -52,7 +60,14 @@ export default async function ProfilePage() {
     // Reload user
     const updatedUser = await prisma.user.findUnique({
       where: { id: userId },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        phone: true,
+        telegramUsername: true,
+        twoFactorEnabled: true,
         team: {
           select: {
             id: true,
@@ -62,9 +77,17 @@ export default async function ProfilePage() {
         stats: true,
       },
     });
-
-    return <ProfileClient user={updatedUser!} />;
+    const decryptedUser = {
+      ...updatedUser!,
+      phone: decryptPII(updatedUser?.phone ?? null),
+      telegramUsername: decryptPII(updatedUser?.telegramUsername ?? null),
+    };
+    return <ProfileClient user={decryptedUser} />;
   }
-
-  return <ProfileClient user={user} />;
+  const decryptedUser = {
+    ...user,
+    phone: decryptPII(user.phone ?? null),
+    telegramUsername: decryptPII(user.telegramUsername ?? null),
+  };
+  return <ProfileClient user={decryptedUser} />;
 }

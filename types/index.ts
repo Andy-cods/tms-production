@@ -21,35 +21,34 @@ export const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
   STAFF: "Tạo yêu cầu và thực hiện công việc được giao",
 };
 
-// Permission helpers
-export const canCreateRequest = (role: UserRole | OldUserRole): boolean => {
-  // All roles can create requests
+// Permission helpers using function declarations with explicit return types
+export function canCreateRequest(role: UserRole | OldUserRole): boolean {
   return ["ADMIN", "LEADER", "STAFF", "ASSIGNEE", "REQUESTER"].includes(role);
-};
+}
 
-export const canAssignTasks = (role: UserRole | OldUserRole): boolean => {
+export function canAssignTasks(role: UserRole | OldUserRole): boolean {
   return ["ADMIN", "LEADER"].includes(role);
-};
+}
 
-export const canViewAllRequests = (role: UserRole | OldUserRole): boolean => {
+export function canViewAllRequests(role: UserRole | OldUserRole): boolean {
   return ["ADMIN", "LEADER"].includes(role);
-};
+}
 
-export const canManageUsers = (role: UserRole | OldUserRole): boolean => {
+export function canManageUsers(role: UserRole | OldUserRole): boolean {
   return role === "ADMIN";
-};
+}
 
-export const canManageTeams = (role: UserRole | OldUserRole): boolean => {
+export function canManageTeams(role: UserRole | OldUserRole): boolean {
   return role === "ADMIN";
-};
+}
 
-export const canAccessLeaderDashboard = (role: UserRole | OldUserRole): boolean => {
+export function canAccessLeaderDashboard(role: UserRole | OldUserRole): boolean {
   return ["ADMIN", "LEADER"].includes(role);
-};
+}
 
-export const canAccessAdminPanel = (role: UserRole | OldUserRole): boolean => {
+export function canAccessAdminPanel(role: UserRole | OldUserRole): boolean {
   return role === "ADMIN";
-};
+}
 
 // Helper to normalize old roles to new roles
 export function normalizeRole(role: UserRole | OldUserRole): UserRole {

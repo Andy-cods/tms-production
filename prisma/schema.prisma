@@ -43,6 +43,10 @@ model User {
   positionText          String?              // Vị trí tự do (text field)
   phone                 String?
   telegramUsername      String?
+  failedLoginAttempts   Int                  @default(0)
+  lockoutUntil          DateTime?
+  twoFactorEnabled      Boolean              @default(false)
+  twoFactorSecret       String?
   permissionTickets     String[]            @default([])
   notificationSettings  NotificationSetting?
   timeLogs              TimeLog[]

@@ -12,7 +12,6 @@
  * References: mindmap VSCAN, SCAN_SERVICE, CONF_SCAN
  */
 
-import fetch from "node-fetch";
 import { prisma } from "@/lib/prisma";
 import type { ScanStatus } from "@prisma/client";
 

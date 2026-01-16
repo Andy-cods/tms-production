@@ -28,7 +28,8 @@ export function LoginForm() {
   const [error, setError] = useState("");
   const [formData, setFormData] = useState({
     email: "",
-    password: ""
+    password: "",
+    otp: "",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -59,13 +60,20 @@ export function LoginForm() {
       const result = await signIn("credentials", {
         email: formData.email,
         password: formData.password,
+        otp: formData.otp || undefined,
         redirect: false
         // Don't pass callbackUrl to signIn to avoid URL construction issues
         // We'll handle redirect manually
       });
 
       if (result?.error) {
-        setError("Email hoặc mật khẩu không đúng");
+        if (result.error === "ACCOUNT_LOCKED") {
+          setError("Tài khoản đang bị khóa tạm thời. Vui lòng thử lại sau.");
+        } else if (result.error === "TWO_FACTOR_REQUIRED") {
+          setError("Vui lòng nhập mã 2FA để đăng nhập.");
+        } else {
+          setError("Email hoặc mật khẩu không đúng");
+        }
         setLoading(false);
         return;
       }
@@ -145,6 +153,24 @@ export function LoginForm() {
               <Eye className="w-5 h-5" />
             )}
           </button>
+        </div>
+      </div>
+
+      {/* 2FA Field */}
+      <div className="space-y-2 group">
+        <Label htmlFor="otp" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          Mã 2FA
+        </Label>
+        <div className="relative">
+          <Input
+            id="otp"
+            type="text"
+            value={formData.otp}
+            onChange={(e) => setFormData({ ...formData, otp: e.target.value })}
+            placeholder="123456"
+            disabled={loading}
+            className="h-12 border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all duration-200 hover:border-gray-400 dark:hover:border-gray-500"
+          />
         </div>
       </div>
 

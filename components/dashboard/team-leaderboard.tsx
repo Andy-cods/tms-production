@@ -78,8 +78,7 @@ export function TeamLeaderboard({ teams, loading, onTeamClick }: Props) {
           </tr>
         </thead>
         <tbody>
-          {sortedTeams.map((team, index) => {
-            const isTop3 = team.rank <= 3;
+          {sortedTeams.map((team) => {
             const bgClass = team.rank === 1 ? 'bg-yellow-50' :
                            team.rank === 2 ? 'bg-gray-50' :
                            team.rank === 3 ? 'bg-orange-50' :

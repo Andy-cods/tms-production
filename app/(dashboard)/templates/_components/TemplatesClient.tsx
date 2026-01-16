@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,30 +103,37 @@ export function TemplatesClient({
     [categories]
   );
 
-  const getFolderId = (template: Template) => {
-    const category = template.defaultCategory
-      ? categoryMap.get(template.defaultCategory.id)
-      : undefined;
-    return category?.teamId && teamMap.has(category.teamId)
-      ? category.teamId
-      : "__uncategorized";
-  };
+  const getFolderId = useCallback(
+    (template: Template) => {
+      const category = template.defaultCategory
+        ? categoryMap.get(template.defaultCategory.id)
+        : undefined;
 
-  const matchesSearchAndCategory = (template: Template) => {
-    const matchesSearch =
-      template.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      template.description?.toLowerCase().includes(searchQuery.toLowerCase());
+      return category?.teamId && teamMap.has(category.teamId)
+        ? category.teamId
+        : "__uncategorized";
+    },
+    [categoryMap, teamMap]
+  );
 
-    const matchesCategory =
-      selectedCategory === "all" ||
-      template.defaultCategory?.id === selectedCategory;
+  const matchesSearchAndCategory = useCallback(
+    (template: Template) => {
+      const matchesSearch =
+        template.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        template.description?.toLowerCase().includes(searchQuery.toLowerCase());
 
-    return matchesSearch && matchesCategory;
-  };
+      const matchesCategory =
+        selectedCategory === "all" ||
+        template.defaultCategory?.id === selectedCategory;
+
+      return matchesSearch && matchesCategory;
+    },
+    [searchQuery, selectedCategory]
+  );
 
   const templatesFilteredBySearch = useMemo(
     () => templates.filter(matchesSearchAndCategory),
-    [templates, searchQuery, selectedCategory]
+    [templates, matchesSearchAndCategory]
   );
 
   const templatesVisible = useMemo(() => {
@@ -139,7 +146,7 @@ export function TemplatesClient({
     return templatesFilteredBySearch.filter(
       (template) => getFolderId(template) === selectedFolder
     );
-  }, [templatesFilteredBySearch, selectedFolder]);
+  }, [getFolderId, selectedFolder, templatesFilteredBySearch]);
 
   const myTemplates = templatesVisible.filter(
     (t) => t.createdById === currentUserId

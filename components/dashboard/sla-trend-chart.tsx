@@ -8,12 +8,11 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
   ReferenceLine,
-  Dot,
 } from "recharts";
 import type { SLATrendData } from "@/lib/services/sla-analysis-service";
+import { TooltipCard, TooltipTitle } from "@/components/charts/tooltip-card";
 
 interface Props {
   data: SLATrendData[];
@@ -33,6 +32,75 @@ const TEAM_COLORS = [
   '#6366f1', // indigo
   '#84cc16', // lime
 ];
+
+type SLATrendTooltipItem = {
+  dataKey: string;
+  name: string;
+  color: string;
+  value?: number;
+};
+
+function SLATrendTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: SLATrendTooltipItem[];
+  label?: string;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  return (
+    <TooltipCard>
+      <TooltipTitle>{label}</TooltipTitle>
+      <div className="space-y-1">
+        {payload.map((item) => (
+          <p key={item.dataKey} className="text-xs flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+            <span className="font-medium">{item.name}:</span>
+            <span className={item.value !== undefined && item.value < 90 ? "text-red-600 font-bold" : ""}>
+              {item.value?.toFixed(1)}%
+            </span>
+          </p>
+        ))}
+      </div>
+    </TooltipCard>
+  );
+}
+
+type SLATrendDotProps = {
+  cx?: number;
+  cy?: number;
+  payload?: Record<string, unknown>;
+  dataKey?: string;
+  stroke?: string;
+};
+
+function SLATrendDot({ cx, cy, payload, dataKey, stroke }: SLATrendDotProps) {
+  if (!cx || !cy || !payload || !dataKey || !stroke) return null;
+
+  const rawValue = payload[dataKey];
+  const value = typeof rawValue === "number" ? rawValue : undefined;
+
+  // Highlight dots below target (90%)
+  if (value !== undefined && value < 90) {
+    return (
+      <circle
+        cx={cx}
+        cy={cy}
+        r={4}
+        fill="#ef4444"
+        stroke="#dc2626"
+        strokeWidth={2}
+      />
+    );
+  }
+
+  return (
+    <circle cx={cx} cy={cy} r={3} fill={stroke} stroke={stroke} strokeWidth={1} />
+  );
+}
 
 export function SLATrendChart({ data, showTeams, loading }: Props) {
   const [hiddenLines, setHiddenLines] = useState<Set<string>>(new Set());
@@ -65,60 +133,6 @@ export function SLATrendChart({ data, showTeams, loading }: Props) {
       newHidden.add(teamName);
     }
     setHiddenLines(newHidden);
-  };
-
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (!active || !payload || !payload.length) return null;
-    
-    return (
-      <div className="bg-white rounded-lg border shadow-lg p-3">
-        <p className="text-sm font-medium text-gray-900 mb-2">{label}</p>
-        <div className="space-y-1">
-          {payload.map((item: any) => (
-            <p key={item.dataKey} className="text-xs flex items-center gap-2">
-              <span 
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: item.color }}
-              />
-              <span className="font-medium">{item.name}:</span>
-              <span className={item.value < 90 ? 'text-red-600 font-bold' : ''}>
-                {item.value?.toFixed(1)}%
-              </span>
-            </p>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const CustomDot = (props: any) => {
-    const { cx, cy, payload, dataKey, stroke } = props;
-    const value = payload[dataKey];
-    
-    // Highlight dots below target (90%)
-    if (value !== undefined && value < 90) {
-      return (
-        <circle
-          cx={cx}
-          cy={cy}
-          r={4}
-          fill="#ef4444"
-          stroke="#dc2626"
-          strokeWidth={2}
-        />
-      );
-    }
-    
-    return (
-      <circle
-        cx={cx}
-        cy={cy}
-        r={3}
-        fill={stroke}
-        stroke={stroke}
-        strokeWidth={1}
-      />
-    );
   };
 
   return (
@@ -163,7 +177,7 @@ export function SLATrendChart({ data, showTeams, loading }: Props) {
               style: { fontSize: 12 }
             }}
           />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<SLATrendTooltip />} />
           
           {/* Target line at 90% */}
           <ReferenceLine 
@@ -200,7 +214,7 @@ export function SLATrendChart({ data, showTeams, loading }: Props) {
                 dataKey={team}
                 stroke={TEAM_COLORS[index % TEAM_COLORS.length]}
                 strokeWidth={2}
-                dot={<CustomDot />}
+                dot={<SLATrendDot />}
                 name={team}
               />
             )

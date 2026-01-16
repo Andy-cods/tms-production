@@ -136,7 +136,6 @@ export class LoadBalancerService {
       // Check cache first
       const cached = this.workloadCache.get(validated.userId);
       if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
-        console.log("✅ Using cached workload for user:", validated.userId);
         return cached.data;
       }
 
@@ -231,13 +230,6 @@ export class LoadBalancerService {
       this.workloadCache.set(validated.userId, {
         data: workloadData,
         timestamp: Date.now(),
-      });
-
-      console.log("✅ Workload calculated for user:", {
-        userId: validated.userId,
-        utilization: `${(utilization * 100).toFixed(1)}%`,
-        active: activeCount,
-        limit: user.wipLimit,
       });
 
       return workloadData;
@@ -335,7 +327,6 @@ export class LoadBalancerService {
 
         // Skip if at WIP limit
         if (utilization >= 1.0) {
-          console.log(`⚠️ User ${user.name} at WIP limit, skipping`);
           continue;
         }
 
@@ -402,19 +393,6 @@ export class LoadBalancerService {
       userScores.sort((a, b) => b.totalScore - a.totalScore);
 
       const bestUser = userScores[0];
-
-      console.log("✅ Best assignee found:", {
-        userId: bestUser.userId,
-        userName: bestUser.userName,
-        totalScore: bestUser.totalScore.toFixed(3),
-        utilization: `${(bestUser.utilization * 100).toFixed(1)}%`,
-        breakdown: {
-          workload: bestUser.workloadScore.toFixed(3),
-          skill: bestUser.skillScore.toFixed(3),
-          sla: bestUser.slaScore.toFixed(3),
-          random: bestUser.randomScore.toFixed(3),
-        },
-      });
 
       return bestUser.userId;
     } catch (error: any) {
@@ -606,12 +584,6 @@ export class LoadBalancerService {
       // Sort suggestions by priority score (highest first)
       suggestions.sort((a, b) => b.priorityScore - a.priorityScore);
 
-      console.log("✅ Rebalance analysis complete:", {
-        overloaded: overloaded.length,
-        underloaded: underloaded.length,
-        suggestions: suggestions.length,
-      });
-
       return {
         success: true,
         suggestions,
@@ -669,4 +641,3 @@ export class LoadBalancerService {
 
 // Export singleton instance
 export const loadBalancerService = new LoadBalancerService();
-

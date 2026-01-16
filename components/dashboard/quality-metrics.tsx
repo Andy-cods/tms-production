@@ -199,7 +199,7 @@ export function QualityMetrics({ reworkData, approvalData, clarificationData, lo
                   />
                   <Tooltip 
                     contentStyle={{ fontSize: 12 }}
-                    formatter={(value: any, name: string, props: any) => [
+                    formatter={(value: any, _name?: string, props?: any) => [
                       `${value}% (${props.payload.count}/${props.payload.totalRequests})`,
                       'Cần làm rõ'
                     ]}

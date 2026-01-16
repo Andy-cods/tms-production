@@ -1,11 +1,12 @@
 const { PrismaClient, Role } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const prisma = new PrismaClient();
 
 async function createUser() {
   const email = process.argv[2] || 'staff@demo.com';
   const name = process.argv[3] || 'Staff Demo';
-  const password = process.argv[4] || '123456';
+  const password = process.argv[4] || crypto.randomBytes(9).toString('base64url');
   const role = process.argv[5] || 'STAFF';
   
   const hashedPassword = await bcrypt.hash(password, 10);

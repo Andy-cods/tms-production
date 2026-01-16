@@ -1,34 +1,43 @@
-import TelegramBot from "node-telegram-bot-api";
-import { BOT_TOKEN, USE_WEBHOOK, WEBHOOK_URL, IS_PRODUCTION } from "@/lib/config/telegram";
+import { BOT_TOKEN } from "@/lib/config/telegram";
 
-let botSingleton: TelegramBot | null = null;
+export type TelegramApiResponse<T> =
+	| { ok: true; result: T }
+	| {
+			ok: false;
+			error_code?: number;
+			description?: string;
+			parameters?: { retry_after?: number };
+	  };
 
-export function getTelegramBot(): TelegramBot | null {
-	if (!BOT_TOKEN) return null;
-	if (botSingleton) return botSingleton;
+const TELEGRAM_API_BASE = BOT_TOKEN
+	? `https://api.telegram.org/bot${BOT_TOKEN}`
+	: "";
 
-	// In development use polling for simplicity; in production prefer webhook
-	const options: TelegramBot.ConstructorOptions = USE_WEBHOOK
-		? { polling: false }
-		: { polling: true };
+export function isTelegramEnabled() {
+	return Boolean(BOT_TOKEN);
+}
 
-	const bot = new TelegramBot(BOT_TOKEN, options);
-
-	if (USE_WEBHOOK && WEBHOOK_URL) {
-		bot.setWebHook(WEBHOOK_URL).catch((err) => {
-			console.warn("[telegram] setWebHook failed:", err?.message || err);
-		});
+export async function telegramRequest<T>(
+	method: string,
+	payload: Record<string, unknown>
+): Promise<TelegramApiResponse<T>> {
+	if (!BOT_TOKEN || !TELEGRAM_API_BASE) {
+		return { ok: false, description: "BOT_DISABLED" };
 	}
 
-	// Simple dev command
-	bot.onText(/^\/start$/, async (msg) => {
-		try {
-			await bot.sendMessage(msg.chat.id, "Xin chào! Bot TMS đã sẵn sàng.");
-		} catch (e: any) {
-			console.warn("[telegram] sendMessage error:", e?.message || e);
-		}
-	});
+	try {
+		const res = await fetch(`${TELEGRAM_API_BASE}/${method}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(payload),
+		});
 
-	botSingleton = bot;
-	return botSingleton;
+		const data = (await res.json().catch(() => null)) as TelegramApiResponse<T> | null;
+		if (!data) {
+			return { ok: false, description: "INVALID_RESPONSE" };
+		}
+		return data;
+	} catch (error: any) {
+		return { ok: false, description: String(error?.message || error) };
+	}
 }

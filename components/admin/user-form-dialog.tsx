@@ -24,11 +24,12 @@ import {
 import { Eye, EyeOff, RefreshCw } from "lucide-react";
 import { createUser, updateUser } from "@/actions/admin/users";
 import { useRouter } from "next/navigation";
+import { passwordSchema } from "@/lib/validations/password";
 
 const userFormSchema = z.object({
   name: z.string().min(2, "Tên phải có ít nhất 2 ký tự").max(100, "Tên không quá 100 ký tự"),
   email: z.string().email("Email không hợp lệ"),
-  password: z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự").or(z.literal("")).optional(),
+  password: z.union([passwordSchema, z.literal("")]).optional(),
   role: z.enum(["ADMIN", "LEADER", "ASSIGNEE"]),
   teamId: z.string().or(z.literal("")).nullable(),
   isActive: z.boolean(),

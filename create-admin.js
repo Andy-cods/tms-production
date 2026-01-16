@@ -1,10 +1,12 @@
 const { PrismaClient, Role } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const prisma = new PrismaClient();
 
 async function createAdmin() {
   try {
-    const hashedPassword = await bcrypt.hash('123456', 10);
+    const password = crypto.randomBytes(9).toString('base64url');
+    const hashedPassword = await bcrypt.hash(password, 10);
     
     const user = await prisma.user.upsert({
       where: { email: 'TechBC@gmail.com' },
@@ -25,7 +27,7 @@ async function createAdmin() {
     
     console.log('✅ Admin user created!');
     console.log(`   Email: ${user.email}`);
-    console.log(`   Password: 123456`);
+    console.log(`   Password: ${password}`);
   } catch (error) {
     console.error('❌ Error:', error.message);
   } finally {

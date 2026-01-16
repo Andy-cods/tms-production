@@ -70,7 +70,8 @@ export function DeleteRequestModal({
           
           <AlertDialogDescription className="text-center">
             <span className="text-base">
-              Bạn có chắc chắn muốn xóa yêu cầu <strong>"{requestTitle}"</strong>?
+              Bạn có chắc chắn muốn xóa yêu cầu{" "}
+              <strong>&quot;{requestTitle}&quot;</strong>?
             </span>
           </AlertDialogDescription>
           
@@ -88,7 +89,7 @@ export function DeleteRequestModal({
             
             <div className="text-left">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Nhập <strong>"XÓA"</strong> để xác nhận:
+                Nhập <strong>&quot;XÓA&quot;</strong> để xác nhận:
               </label>
               <input
                 type="text"

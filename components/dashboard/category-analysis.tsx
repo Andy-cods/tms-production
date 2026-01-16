@@ -7,14 +7,38 @@ import {
   Cell,
   ResponsiveContainer,
   Tooltip,
-  Legend,
 } from "recharts";
 import type { CategoryData } from "@/lib/types/dashboard";
+import { TooltipCard } from "@/components/charts/tooltip-card";
 
 interface Props {
   categories: CategoryData[];
   loading?: boolean;
   onCategoryClick?: (categoryId: string) => void;
+}
+
+type CategoryTooltipItem = { payload: CategoryData };
+
+function CategoryTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: CategoryTooltipItem[];
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const item = payload[0]?.payload;
+  if (!item) return null;
+
+  return (
+    <TooltipCard>
+      <p className="text-sm font-medium text-gray-900 mb-1">{item.categoryName}</p>
+      <p className="text-xs text-gray-700">Tổng: {item.total}</p>
+      <p className="text-xs text-gray-700">Hoàn thành: {item.completed}</p>
+      <p className="text-xs text-gray-600">Tỷ lệ: {item.completionRate.toFixed(1)}%</p>
+    </TooltipCard>
+  );
 }
 
 export function CategoryAnalysis({ categories, loading, onCategoryClick }: Props) {
@@ -56,20 +80,6 @@ export function CategoryAnalysis({ categories, loading, onCategoryClick }: Props
 
   const totalRequests = categories.reduce((sum, cat) => sum + cat.total, 0);
 
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (!active || !payload || !payload.length) return null;
-    
-    const data = payload[0].payload;
-    return (
-      <div className="bg-white rounded-lg border shadow-lg p-3">
-        <p className="text-sm font-medium text-gray-900 mb-1">{data.categoryName}</p>
-        <p className="text-xs text-gray-700">Tổng: {data.total}</p>
-        <p className="text-xs text-gray-700">Hoàn thành: {data.completed}</p>
-        <p className="text-xs text-gray-600">Tỷ lệ: {data.completionRate.toFixed(1)}%</p>
-      </div>
-    );
-  };
-
   return (
     <div className="space-y-6">
       {/* Pie Chart */}
@@ -91,7 +101,7 @@ export function CategoryAnalysis({ categories, loading, onCategoryClick }: Props
                 <Cell key={`cell-${index}`} fill={entry.color} />
               ))}
             </Pie>
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<CategoryTooltip />} />
           </PieChart>
         </ResponsiveContainer>        <div className="text-center text-sm text-gray-600 mt-2">
           Tổng: {totalRequests} yêu cầu

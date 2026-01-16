@@ -9,14 +9,62 @@ import {
   PolarRadiusAxis,
   ResponsiveContainer,
   Tooltip,
-  Legend,
 } from "recharts";
 import type { TeamRadarData } from "@/lib/services/team-performance-service";
+import { TooltipCard, TooltipTitle } from "@/components/charts/tooltip-card";
 
 interface Props {
   teams: TeamRadarData[];
   selectedTeamIds?: string[];
   loading?: boolean;
+}
+
+type RadarDatum = { metric: string } & Record<string, number | string>;
+
+type RechartsTooltipItem = {
+  name: string;
+  value: number;
+  stroke: string;
+  payload: { metric: string };
+};
+
+function TeamRadarTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: RechartsTooltipItem[];
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  return (
+    <TooltipCard>
+      <TooltipTitle>{payload[0]?.payload?.metric}</TooltipTitle>
+      <div className="space-y-1">
+        {payload.map((item, index) => (
+          <p key={index} className="text-xs" style={{ color: item.stroke }}>
+            <span className="font-medium">{item.name}:</span>{" "}
+            {Number.isFinite(item.value) ? item.value.toFixed(1) : item.value}
+          </p>
+        ))}
+      </div>
+    </TooltipCard>
+  );
+}
+
+function getMetricDescription(metric: string) {
+  switch (metric) {
+    case "speed":
+      return "Nhanh hơn = Tốt hơn";
+    case "quality":
+      return "Duyệt lần đầu";
+    case "capacity":
+      return "Tasks/ngày";
+    case "sla":
+      return "% đúng hạn";
+    default:
+      return "Số lượng hoàn thành";
+  }
 }
 
 const TEAM_COLORS = [
@@ -35,7 +83,7 @@ const METRIC_LABELS: Record<string, string> = {
   volume: 'Khối lượng',
 };
 
-export function TeamRadarChart({ teams, selectedTeamIds, loading }: Props) {
+export function TeamRadarChart({ teams, loading }: Props) {
   const [visibleTeams, setVisibleTeams] = useState<Set<string>>(
     new Set(teams.slice(0, 5).map(t => t.teamId))
   );
@@ -59,15 +107,15 @@ export function TeamRadarChart({ teams, selectedTeamIds, loading }: Props) {
 
   // Transform data for radar chart
   const metrics = ['speed', 'quality', 'capacity', 'sla', 'volume'];
-  const radarData = metrics.map(metric => {
-    const dataPoint: any = { metric: METRIC_LABELS[metric] };
-    
-    displayTeams.forEach((team, index) => {
+  const radarData: RadarDatum[] = metrics.map((metric) => {
+    const dataPoint: RadarDatum = { metric: METRIC_LABELS[metric] ?? metric };
+
+    displayTeams.forEach((team) => {
       if (visibleTeams.has(team.teamId)) {
-        dataPoint[team.teamName] = team[metric as keyof TeamRadarData];
+        dataPoint[team.teamName] = Number(team[metric as keyof TeamRadarData]);
       }
     });
-    
+
     return dataPoint;
   });
 
@@ -79,25 +127,6 @@ export function TeamRadarChart({ teams, selectedTeamIds, loading }: Props) {
       newVisible.add(teamId);
     }
     setVisibleTeams(newVisible);
-  };
-
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (!active || !payload || !payload.length) return null;
-    
-    return (
-      <div className="bg-white rounded-lg border shadow-lg p-3">
-        <p className="text-sm font-medium text-gray-900 mb-2">
-          {payload[0].payload.metric}
-        </p>
-        <div className="space-y-1">
-          {payload.map((item: any, index: number) => (
-            <p key={index} className="text-xs" style={{ color: item.stroke }}>
-              <span className="font-medium">{item.name}:</span> {item.value.toFixed(1)}
-            </p>
-          ))}
-        </div>
-      </div>
-    );
   };
 
   return (
@@ -135,7 +164,7 @@ export function TeamRadarChart({ teams, selectedTeamIds, loading }: Props) {
             tick={{ fontSize: 11 }}
             tickCount={6}
           />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<TeamRadarTooltip />} />
           
           {displayTeams.map((team, index) => (
             visibleTeams.has(team.teamId) && (
@@ -161,13 +190,7 @@ export function TeamRadarChart({ teams, selectedTeamIds, loading }: Props) {
             <div className="mt-0.5 w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
             <div>
               <p className="font-medium text-gray-900">{METRIC_LABELS[metric]}</p>
-              <p className="text-xs text-gray-500">
-                {metric === 'speed' ? 'Nhanh hơn = Tốt hơn' :
-                 metric === 'quality' ? 'Duyệt lần đầu' :
-                 metric === 'capacity' ? 'Tasks/ngày' :
-                 metric === 'sla' ? '% đúng hạn' :
-                 'Số lượng hoàn thành'}
-              </p>
+              <p className="text-xs text-gray-500">{getMetricDescription(metric)}</p>
             </div>
           </div>
         ))}

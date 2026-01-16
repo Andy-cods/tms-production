@@ -11,14 +11,44 @@ import {
   ResponsiveContainer,
   Cell,
   LabelList,
-  ReferenceLine,
 } from "recharts";
 import type { ResponseTimeData } from "@/lib/services/performance-service";
+import { TooltipCard } from "@/components/charts/tooltip-card";
+import { formatPercent } from "@/components/charts/recharts-formatters";
 
 interface Props {
   data: ResponseTimeData[];
   slaTarget?: number; // in hours
   loading?: boolean;
+}
+
+type ResponseTimeTooltipItem = {
+  payload: ResponseTimeData;
+};
+
+function ResponseTimeTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: ResponseTimeTooltipItem[];
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const item = payload[0]?.payload;
+  if (!item) return null;
+
+  return (
+    <TooltipCard>
+      <p className="text-sm font-medium text-gray-900 mb-1">
+        Thời gian: {item.range}
+      </p>
+      <p className="text-sm text-gray-700">
+        Số lượng: <span className="font-medium">{item.count}</span>
+      </p>
+      <p className="text-sm text-gray-600">Tỷ lệ: {item.percentage}%</p>
+    </TooltipCard>
+  );
 }
 
 function getSLAColor(range: string, slaTarget: number = 8): string {
@@ -55,25 +85,6 @@ export function ResponseTimeChart({ data, slaTarget = 8, loading }: Props) {
     );
   }
 
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (!active || !payload || !payload.length) return null;
-    
-    const data = payload[0].payload;
-    return (
-      <div className="bg-white rounded-lg border shadow-lg p-3">
-        <p className="text-sm font-medium text-gray-900 mb-1">
-          Thời gian: {data.range}
-        </p>
-        <p className="text-sm text-gray-700">
-          Số lượng: <span className="font-medium">{data.count}</span>
-        </p>
-        <p className="text-sm text-gray-600">
-          Tỷ lệ: {data.percentage}%
-        </p>
-      </div>
-    );
-  };
-
   // Calculate summary stats
   const fastResponseCount = data
     .filter(d => d.range === '<1h' || d.range === '1-4h')
@@ -94,13 +105,13 @@ export function ResponseTimeChart({ data, slaTarget = 8, loading }: Props) {
             tick={{ fontSize: 12 }}
             label={{ value: 'Số lượng', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }}
           />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<ResponseTimeTooltip />} />
           
           <Bar dataKey="count" radius={[8, 8, 0, 0]}>
             <LabelList 
               dataKey="percentage" 
               position="top" 
-              formatter={(value: any) => `${Number(value).toFixed(0)}%`}
+              formatter={(value: unknown) => formatPercent(value, 0)}
               style={{ fontSize: 11, fill: '#374151' }}
             />
             {data.map((entry, index) => (

@@ -1,6 +1,4 @@
-import TelegramBot from "node-telegram-bot-api";
-import { getTelegramBot } from "@/lib/telegram";
-import { BOT_USERNAME } from "@/lib/config/telegram";
+import { isTelegramEnabled, telegramRequest } from "@/lib/telegram";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 
@@ -140,8 +138,7 @@ async function writeAudit(entityId: string, newValue: Record<string, unknown>) {
 }
 
 export async function sendTelegramMessage(payload: TelegramMessagePayload): Promise<TelegramResult> {
-	const bot = getTelegramBot();
-	if (!bot) {
+	if (!isTelegramEnabled()) {
 		return { success: false, error: "BOT_DISABLED" };
 	}
 	if (payload == null || payload.chatId == null || payload.chatId === "") {
@@ -151,60 +148,71 @@ export async function sendTelegramMessage(payload: TelegramMessagePayload): Prom
 		return { success: false, error: "EMPTY_MESSAGE" };
 	}
 
-	const options: TelegramBot.SendMessageOptions = {
+	const body = {
+		chat_id: payload.chatId,
+		text: payload.message,
 		parse_mode: payload.parseMode || "Markdown",
 		disable_notification: payload.disableNotification ?? false,
-		reply_markup: createInlineKeyboard(payload.buttons) as any,
+		reply_markup: createInlineKeyboard(payload.buttons),
 		disable_web_page_preview: true,
 	};
 
 	try {
-		const res = await bot.sendMessage(payload.chatId, payload.message, options);
-		await writeAudit(String(payload.chatId), {
-			messagePreview: payload.message.slice(0, 100),
-			status: "SUCCESS",
-			messageId: res.message_id,
-		});
-		return { success: true, messageId: res.message_id };
-	} catch (err: any) {
-		const msg = String(err?.message || err);
-		const code = Number(err?.response?.statusCode || err?.code);
+		const res = await telegramRequest<{ message_id: number }>("sendMessage", body);
+		if (!res.ok) {
+			const msg = res.description || "TELEGRAM_ERROR";
+			const code = Number(res.error_code || 0);
 
-		if (msg.includes("403") || msg.includes("bot was blocked") || code === 403) {
-			await writeAudit(String(payload.chatId), {
-				messagePreview: payload.message.slice(0, 100),
-				status: "USER_BLOCKED",
-			});
-			return { success: false, error: "USER_BLOCKED" };
-		}
-		if (msg.includes("400") || msg.includes("chat not found") || code === 400) {
-			await writeAudit(String(payload.chatId), {
-				messagePreview: payload.message.slice(0, 100),
-				status: "CHAT_NOT_FOUND",
-			});
-			return { success: false, error: "CHAT_NOT_FOUND" };
-		}
-		if (msg.includes("429") || msg.includes("Too Many Requests") || code === 429) {
-			const retryAfter = Number(err?.response?.body?.parameters?.retry_after || 1);
-			await sleep(retryAfter * 1000);
-			try {
-				const res2 = await bot.sendMessage(payload.chatId, payload.message, options);
+			if (code === 403 || msg.includes("bot was blocked")) {
 				await writeAudit(String(payload.chatId), {
 					messagePreview: payload.message.slice(0, 100),
-					status: "SUCCESS_RETRY",
-					messageId: res2.message_id,
+					status: "USER_BLOCKED",
 				});
-				return { success: true, messageId: res2.message_id };
-			} catch (e2: any) {
+				return { success: false, error: "USER_BLOCKED" };
+			}
+			if (code === 400 || msg.includes("chat not found")) {
+				await writeAudit(String(payload.chatId), {
+					messagePreview: payload.message.slice(0, 100),
+					status: "CHAT_NOT_FOUND",
+				});
+				return { success: false, error: "CHAT_NOT_FOUND" };
+			}
+			if (code === 429 || msg.includes("Too Many Requests")) {
+				const retryAfter = Number(res.parameters?.retry_after || 1);
+				await sleep(retryAfter * 1000);
+				const res2 = await telegramRequest<{ message_id: number }>("sendMessage", body);
+				if (res2.ok) {
+					await writeAudit(String(payload.chatId), {
+						messagePreview: payload.message.slice(0, 100),
+						status: "SUCCESS_RETRY",
+						messageId: res2.result.message_id,
+					});
+					return { success: true, messageId: res2.result.message_id };
+				}
 				await writeAudit(String(payload.chatId), {
 					messagePreview: payload.message.slice(0, 100),
 					status: "FAILED_RETRY",
-					error: String(e2?.message || e2),
+					error: res2.description || "RATE_LIMIT",
 				});
 				return { success: false, error: "RATE_LIMIT" };
 			}
+
+			await writeAudit(String(payload.chatId), {
+				messagePreview: payload.message.slice(0, 100),
+				status: "ERROR",
+				error: msg,
+			});
+			return { success: false, error: msg };
 		}
 
+		await writeAudit(String(payload.chatId), {
+			messagePreview: payload.message.slice(0, 100),
+			status: "SUCCESS",
+			messageId: res.result.message_id,
+		});
+		return { success: true, messageId: res.result.message_id };
+	} catch (err: any) {
+		const msg = String(err?.message || err);
 		await writeAudit(String(payload.chatId), {
 			messagePreview: payload.message.slice(0, 100),
 			status: "ERROR",

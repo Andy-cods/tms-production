@@ -93,38 +93,12 @@ export function RequestTable({ items, currentPage, totalPages, totalItems, searc
     });
   }
 
-  function getStatusColor(status: string) {
-    switch (status) {
-      case 'OPEN': return 'bg-blue-100 text-blue-800';
-      case 'IN_PROGRESS': return 'bg-yellow-100 text-yellow-800';
-      case 'IN_REVIEW': return 'bg-purple-100 text-purple-800';
-      case 'DONE': return 'bg-green-100 text-green-800';
-      case 'REJECTED': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  }
-
-  function getPriorityColor(priority: string) {
-    switch (priority) {
-      case 'LOW': return 'bg-gray-100 text-gray-800';
-      case 'MEDIUM': return 'bg-blue-100 text-blue-800';
-      case 'HIGH': return 'bg-orange-100 text-orange-800';
-      case 'URGENT': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  }
-
-  function formatDate(date: Date) {
+  function formatDate(date: Date): string {
     return new Date(date).toLocaleDateString('vi-VN', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
     });
-  }
-
-  function isOverdue(deadline: Date | null) {
-    if (!deadline) return false;
-    return new Date(deadline) < new Date();
   }
 
   // Empty state

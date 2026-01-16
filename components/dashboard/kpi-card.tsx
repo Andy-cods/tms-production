@@ -18,6 +18,7 @@ export interface KPICardProps {
 
 export function KPICard({ title, value, change, trend, icon, color, description, loading }: KPICardProps) {
   const IconComponent = (Icons as any)[icon] as LucideIcon;
+  void color;
 
   if (loading) {
     return (

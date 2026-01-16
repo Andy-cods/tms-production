@@ -9,29 +9,49 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
+import type { PieLabelRenderProps } from "recharts";
 import type { WorkloadDistribution } from "@/lib/services/chart-service";
+import { TooltipCard } from "@/components/charts/tooltip-card";
+import { TASK_STATUS_COLORS, TASK_STATUS_LABELS } from "@/lib/constants/dashboard";
 
 interface Props {
   data: WorkloadDistribution[];
   loading?: boolean;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  TODO: '#9CA3AF',        // gray-400
-  IN_PROGRESS: '#FF872E', // accent-500 (orange)
-  IN_REVIEW: '#3B82F6',   // blue-500
-  BLOCKED: '#EF4444',     // red-500
-  DONE: '#52B26B',        // primary-500 (green)
-  REWORK: '#F59E0B',      // amber-500
+type WorkloadTooltipPayloadItem = {
+  name: string;
+  payload: { count: number; percentage: number };
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  TODO: 'Chưa bắt đầu',
-  IN_PROGRESS: 'Đang làm',
-  IN_REVIEW: 'Chờ duyệt',
-  BLOCKED: 'Bị chặn',
-  DONE: 'Hoàn thành',
-};
+function WorkloadDistributionTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: WorkloadTooltipPayloadItem[];
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const item = payload[0];
+
+  return (
+    <TooltipCard className="rounded-xl border-gray-200">
+      <p className="text-sm font-medium text-dark-900 mb-1">{item?.name}</p>
+      <p className="text-sm text-gray-700">
+        <span className="font-medium">Số lượng:</span> {item?.payload?.count}
+      </p>
+      <p className="text-sm text-primary-600 font-semibold">
+        <span className="font-medium">Tỷ lệ:</span> {item?.payload?.percentage}%
+      </p>
+    </TooltipCard>
+  );
+}
+
+function renderPieLabel(props: PieLabelRenderProps) {
+  const percentage = (props.payload as any)?.percentage;
+  return `${percentage ?? 0}%`;
+}
 
 export function WorkloadDistributionChart({ data, loading }: Props) {
   if (loading) {
@@ -66,32 +86,9 @@ export function WorkloadDistributionChart({ data, loading }: Props) {
   // Enhance data with labels
   const chartData = data.map(item => ({
     ...item,
-    name: STATUS_LABELS[item.status] || item.status,
-    fill: STATUS_COLORS[item.status] || '#6b7280',
+    name: TASK_STATUS_LABELS[item.status] || item.status,
+    fill: TASK_STATUS_COLORS[item.status] || '#6b7280',
   }));
-
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (!active || !payload || !payload.length) return null;
-    
-    const data = payload[0];
-    return (
-      <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-3">
-        <p className="text-sm font-medium text-dark-900 mb-1">
-          {data.name}
-        </p>
-        <p className="text-sm text-gray-700">
-          <span className="font-medium">Số lượng:</span> {data.payload.count}
-        </p>
-        <p className="text-sm text-primary-600 font-semibold">
-          <span className="font-medium">Tỷ lệ:</span> {data.payload.percentage}%
-        </p>
-      </div>
-    );
-  };
-
-  const renderLabel = (entry: any) => {
-    return `${entry.percentage}%`;
-  };
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -109,7 +106,7 @@ export function WorkloadDistributionChart({ data, loading }: Props) {
             cx="50%"
             cy="50%"
             labelLine={false}
-            label={renderLabel}
+            label={renderPieLabel}
             outerRadius={90}
             innerRadius={50}
             dataKey="count"
@@ -119,7 +116,7 @@ export function WorkloadDistributionChart({ data, loading }: Props) {
               <Cell key={`cell-${index}`} fill={entry.fill} />
             ))}
           </Pie>
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<WorkloadDistributionTooltip />} />
           <Legend 
             layout="horizontal"
             verticalAlign="bottom"

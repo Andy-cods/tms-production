@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
 import type { Bottleneck } from "@/lib/services/workload-service";
+import { TASK_STATUS_LABELS } from "@/lib/constants/dashboard";
 
 interface Props {
   bottlenecks: Bottleneck[];
@@ -31,11 +32,16 @@ const SEVERITY_CONFIG = {
   },
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  IN_PROGRESS: 'Đang làm',
-  IN_REVIEW: 'Chờ duyệt',
-  BLOCKED: 'Bị chặn',
-};
+function getSeverityLabel(severity: Bottleneck["severity"]) {
+  switch (severity) {
+    case "high":
+      return "Cao";
+    case "medium":
+      return "Trung bình";
+    default:
+      return "Thấp";
+  }
+}
 
 export function BottleneckAlerts({ bottlenecks, loading }: Props) {
   if (loading) {
@@ -82,7 +88,7 @@ export function BottleneckAlerts({ bottlenecks, loading }: Props) {
                 <div className="space-y-1 text-xs text-gray-600">
                   <p>
                     <span className="font-medium">Trạng thái:</span>{' '}
-                    {STATUS_LABELS[bottleneck.status] || bottleneck.status}
+                    {TASK_STATUS_LABELS[bottleneck.status] || bottleneck.status}
                   </p>
                   <p>
                     <span className="font-medium">Trung bình:</span>{' '}
@@ -101,9 +107,7 @@ export function BottleneckAlerts({ bottlenecks, loading }: Props) {
 
               {/* Severity badge */}
               <div className={`px-2 py-1 rounded text-xs font-medium ${config.text} ${config.bg} border ${config.border}`}>
-                {bottleneck.severity === 'high' ? 'Cao' : 
-                 bottleneck.severity === 'medium' ? 'Trung bình' : 
-                 'Thấp'}
+                {getSeverityLabel(bottleneck.severity)}
               </div>
             </div>
           </div>

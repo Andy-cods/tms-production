@@ -21,11 +21,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { PermissionTicketSelector } from '@/components/admin/permission-ticket-selector';
+import { passwordSchema } from '@/lib/validations/password';
 
 const userSchema = z.object({
   name: z.string().min(2, 'Tên phải có ít nhất 2 ký tự'),
   email: z.string().email('Email không hợp lệ'),
-  password: z.string().min(6, 'Mật khẩu phải có ít nhất 6 ký tự'),
+  password: passwordSchema,
   role: z.nativeEnum(Role),
   teamId: z.string().optional(),
   positionText: z.string().optional(),

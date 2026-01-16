@@ -341,7 +341,9 @@ export default function CommandPalette() {
           {query && !loading && !hasResults && (
             <div className="p-8 text-center text-gray-500">
               <Search className="w-12 h-12 mx-auto mb-2 opacity-20" />
-              <p className="text-sm">No results found for "{query}"</p>
+              <p className="text-sm">
+                No results found for &quot;{query}&quot;
+              </p>
             </div>
           )}
         </div>

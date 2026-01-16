@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect, notFound } from "next/navigation";
 import { EditUserForm } from "./_components/EditUserForm";
+import { decryptPII } from "@/lib/security/crypto";
 
 export default async function UserEditPage({
   params,
@@ -26,6 +27,11 @@ export default async function UserEditPage({
   if (!user) {
     notFound();
   }
+  const decryptedUser = {
+    ...user,
+    phone: decryptPII(user.phone ?? null),
+    telegramUsername: decryptPII(user.telegramUsername ?? null),
+  };
 
   const teams = await prisma.team.findMany({
     where: { isActive: true },
@@ -44,7 +50,7 @@ export default async function UserEditPage({
       </div>
 
       <EditUserForm
-        user={user}
+        user={decryptedUser}
         teams={teams}
         positions={[]}
       />
