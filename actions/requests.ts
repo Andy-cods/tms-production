@@ -278,6 +278,50 @@ export async function createRequestAction(formData: FormData) {
     Logger.warn("Failed to send Telegram for request create", { action: "createRequest", requestId: created.id, error: (e as any)?.message });
   }
 
+  // === SAME-DEPARTMENT BYPASS: Auto-accept if creator and request are in same department ===
+  // When request is sent within the same department, skip leader approval step
+  const isSameDepartment = me.teamId && input.teamId && me.teamId === input.teamId;
+
+  if (isSameDepartment) {
+    try {
+      await prisma.request.update({
+        where: { id: created.id },
+        data: {
+          acceptedAt: new Date(),
+          acceptedBy: me.id,
+        } as any,
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          userId: me.id,
+          action: "AUTO_ACCEPTED_SAME_DEPT",
+          entity: "Request",
+          entityId: created.id,
+          newValue: {
+            reason: "Yêu cầu cùng phòng ban - tự động chấp nhận",
+            creatorTeamId: me.teamId,
+            requestTeamId: input.teamId,
+          },
+          requestId: created.id,
+        },
+      });
+
+      Logger.info("Request auto-accepted (same department)", {
+        action: "createRequest",
+        requestId: created.id,
+        creatorTeamId: me.teamId,
+        requestTeamId: input.teamId,
+      });
+    } catch (autoAcceptError) {
+      Logger.warn("Failed to auto-accept same-department request", {
+        action: "createRequest",
+        requestId: created.id,
+        error: autoAcceptError instanceof Error ? autoAcceptError.message : 'Unknown error',
+      });
+    }
+  }
+
   // Calculate and set SLA deadline for the request
   try {
     const slaResult = await calculateSlaDeadline({
