@@ -57,7 +57,16 @@ export async function canViewRequest(
   const request = await prisma.request.findFirst({
     where: {
       id: requestId,
-      creatorId: userId,
+      OR: [
+        { creatorId: userId },
+        {
+          tasks: {
+            some: {
+              assigneeId: userId,
+            },
+          },
+        },
+      ],
     },
   });
 
@@ -107,7 +116,16 @@ export async function getAccessibleRequests(
   // Staff: Only their requests + requests with assigned tasks
   return prisma.request.findMany({
     where: {
-      creatorId: userId,
+      OR: [
+        { creatorId: userId },
+        {
+          tasks: {
+            some: {
+              assigneeId: userId,
+            },
+          },
+        },
+      ],
     },
     orderBy: { createdAt: "desc" },
   });
@@ -159,7 +177,18 @@ export function buildRequestWhereClause(
   }
   
   // Staff: only their requests or requests with assigned tasks
-  appendAnd({ creatorId: userId });
+  appendAnd({
+    OR: [
+      { creatorId: userId },
+      {
+        tasks: {
+          some: {
+            assigneeId: userId,
+          },
+        },
+      },
+    ],
+  });
   return result;
 }
 

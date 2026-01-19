@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { loadBalancerService } from "@/lib/services/load-balancer";
 import { sendTelegramMessage } from "@/lib/services/telegram-service";
+import { notificationService } from "@/lib/services/notification-service";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { APP_URL } from "@/lib/config/telegram";
@@ -212,6 +213,19 @@ export async function autoAssignRequest(requestId: string) {
         } as Prisma.InputJsonValue,
       },
     });
+
+    // Send in-app notification to assignee
+    try {
+      await notificationService.notifyTaskAssigned(
+        validated.requestId,
+        assigneeId,
+        task.title
+      );
+      console.log(`[Assignment] Notification sent to ${assignee.name} for task: ${task.title}`);
+    } catch (notifError) {
+      console.error("[Assignment] Failed to send notification:", notifError);
+      // Don't fail the assignment if notification fails
+    }
 
     // TODO: Telegram notifications require telegramChatId field in User model
     // Uncomment after adding telegramChatId to prisma/schema.prisma User model
@@ -423,6 +437,19 @@ export async function manualAssignWithCheck(
       },
     });
 
+    // Send in-app notification to new assignee
+    try {
+      await notificationService.notifyTaskAssigned(
+        task.requestId || task.id,
+        validated.assigneeId,
+        task.title
+      );
+      console.log(`[Assignment] Notification sent to ${newAssignee.name} for task: ${task.title}`);
+    } catch (notifError) {
+      console.error("[Assignment] Failed to send notification:", notifError);
+      // Don't fail the assignment if notification fails
+    }
+
     // TODO: Telegram notifications require telegramChatId field in User model
     // Uncomment after adding telegramChatId to prisma/schema.prisma User model
     // if (newAssignee.telegramChatId) {
@@ -619,6 +646,18 @@ export async function reassignTask(
         } as Prisma.InputJsonValue,
       },
     });
+
+    // Send in-app notification to new assignee
+    try {
+      await notificationService.notifyTaskAssigned(
+        task.requestId || task.id,
+        validated.newAssigneeId,
+        `${task.title} (Chuyển giao: ${validated.reason})`
+      );
+      console.log(`[Reassignment] Notification sent to ${newAssignee.name} for task: ${task.title}`);
+    } catch (notifError) {
+      console.error("[Reassignment] Failed to send notification:", notifError);
+    }
 
     // TODO: Telegram notifications require telegramChatId field in User model
     // Uncomment after adding telegramChatId to prisma/schema.prisma User model

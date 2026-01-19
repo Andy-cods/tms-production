@@ -33,11 +33,20 @@ export function DateTimePicker({
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(
     value ? new Date(value) : undefined
   );
-  
+
   // Time state - 24-hour format internally
   const [timeValue, setTimeValue] = useState<string>(
     value ? format(new Date(value), "HH:mm") : "09:00"
   );
+
+  // Auto-select today when popover opens if no date selected
+  const handleOpenChange = (isOpen: boolean) => {
+    if (isOpen && !selectedDate && !value) {
+      // Auto-select today so Apply button is enabled
+      setSelectedDate(new Date());
+    }
+    setOpen(isOpen);
+  };
 
   const handleDateSelect = (date: Date | undefined) => {
     setSelectedDate(date);
@@ -117,7 +126,7 @@ export function DateTimePicker({
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
