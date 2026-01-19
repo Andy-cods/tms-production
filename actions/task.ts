@@ -5,6 +5,7 @@ import { Prisma, TaskStatus } from '@prisma/client';
 import { auth } from '@/lib/auth';
 import { revalidatePath } from 'next/cache';
 import { dashboardService } from '@/lib/services/dashboard-service';
+import { notificationService } from '@/lib/services/notification-service';
 
 export async function getMyTasks(filters: {
   status: string;
@@ -270,6 +271,21 @@ export async function createTaskForRequest(requestId: string, taskData: {
           taskId: task.id,
         },
       });
+    }
+
+    // NOTIFY ASSIGNEE: Send notification to the assigned person
+    if (taskData.assigneeId) {
+      try {
+        await notificationService.notifyTaskAssigned(
+          requestId,
+          taskData.assigneeId,
+          task.title
+        );
+        console.log(`[createTaskForRequest] Notification sent to assignee for task: ${task.title}`);
+      } catch (notifError) {
+        console.error("[createTaskForRequest] Failed to send notification to assignee:", notifError);
+        // Don't fail the task creation if notification fails
+      }
     }
 
     revalidatePath(`/requests/${requestId}`);
@@ -1105,7 +1121,7 @@ export async function updateTaskAction(taskId: string, formData: FormData) {
     // If custom task and deadline changed, notify Leader (if exists)
     if (!isFixedTask && deadlineChanged && currentTask.request.team?.leaderId) {
       const leaderId = currentTask.request.team.leaderId;
-      
+
       // Don't notify if the updater is the leader themselves
       if (leaderId !== userId) {
         await prisma.notification.create({
@@ -1118,6 +1134,22 @@ export async function updateTaskAction(taskId: string, formData: FormData) {
             taskId: taskId,
           },
         });
+      }
+    }
+
+    // NOTIFY NEW ASSIGNEE: If assignee changed, notify the new assignee
+    const assigneeChanged = currentTask.assigneeId !== updated.assigneeId;
+    if (assigneeChanged && updated.assigneeId) {
+      try {
+        await notificationService.notifyTaskAssigned(
+          currentTask.requestId,
+          updated.assigneeId,
+          updated.title
+        );
+        console.log(`[updateTaskAction] Notification sent to new assignee for task: ${updated.title}`);
+      } catch (notifError) {
+        console.error("[updateTaskAction] Failed to send notification to new assignee:", notifError);
+        // Don't fail the update if notification fails
       }
     }
 

@@ -36,6 +36,7 @@ interface ModernSidebarProps {
   userName?: string;
   escalationsCount?: number;
   notificationsCount?: number;
+  newTasksCount?: number;
 }
 
 interface NavItem {
@@ -129,6 +130,7 @@ export default function ModernSidebar({
   userName,
   escalationsCount = 0,
   notificationsCount = 0,
+  newTasksCount = 0,
 }: ModernSidebarProps) {
   const pathname = usePathname();
   const { isCollapsed, toggle, setCollapsed } = useSidebarStore();
@@ -213,7 +215,11 @@ export default function ModernSidebar({
           <NavLink href="/requests" icon={FileText} isCollapsed={isCollapsed}>
             Yêu cầu
           </NavLink>
-          
+
+          <NavLink href="/my-tasks" icon={CheckSquare} badge={newTasksCount} isCollapsed={isCollapsed}>
+            Công việc của tôi
+          </NavLink>
+
           {/* Bảng Leader */}
           {role === "LEADER" && (
             <NavLink href="/leader" icon={Users} isCollapsed={isCollapsed}>

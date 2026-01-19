@@ -5,7 +5,7 @@ import { getUserId } from "@/lib/auth-helpers";
 
 export default async function ModernSidebarServer() {
   const session = await auth();
-  
+
   if (!session?.user) {
     return null;
   }
@@ -13,6 +13,9 @@ export default async function ModernSidebarServer() {
   // Fetch counts with proper error handling
   let escalationsCount = 0;
   let notificationsCount = 0;
+  let newTasksCount = 0;
+
+  const userId = getUserId(session);
 
   try {
     // Count active escalations - simplified where clause
@@ -31,8 +34,7 @@ export default async function ModernSidebarServer() {
   }
 
   try {
-    // Count unread notifications - FIX: isRead instead of read
-    const userId = getUserId(session);
+    // Count unread notifications
     const notifications = await prisma.notification.count({
       where: {
         userId: userId,
@@ -45,12 +47,28 @@ export default async function ModernSidebarServer() {
     // Keep default 0
   }
 
+  try {
+    // Count unread TASK_ASSIGNED notifications (new tasks the user hasn't seen)
+    const newTasks = await prisma.notification.count({
+      where: {
+        userId: userId,
+        type: "TASK_ASSIGNED",
+        isRead: false
+      }
+    });
+    newTasksCount = newTasks;
+  } catch (error) {
+    console.error("[Sidebar] Error counting new tasks:", error);
+    // Keep default 0
+  }
+
   return (
     <ModernSidebar
       role={(session.user as any).role || "ASSIGNEE"}
       userName={session.user.name || undefined}
       escalationsCount={escalationsCount}
       notificationsCount={notificationsCount}
+      newTasksCount={newTasksCount}
     />
   );
 }

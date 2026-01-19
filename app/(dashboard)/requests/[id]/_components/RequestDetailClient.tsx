@@ -105,17 +105,22 @@ export function RequestDetailClient({
   const isLeaderForRequest = request.team?.leaderId === userId;
   const isRequesterForRequest = request.creatorId === userId;
   const isTeamMember = request.team?.members?.some((m: any) => m.id === userId) || false;
+  const isAssigneeForRequest = request.tasks?.some((t: any) => t.assigneeId === userId) || false;
   const isAccepted = !!request.acceptedAt;
-  
+
   // Permission: Ai có thể tiếp nhận?
-  // - Admin, Leader của team được giao, hoặc member của team
+  // - Admin: luôn có quyền
+  // - Leader của team được giao
+  // - Người được giao task trong request này (assignee)
+  // - KHÔNG PHẢI người tạo request (họ là người yêu cầu, không có quyền tiếp nhận)
   // - Chỉ khi chưa tiếp nhận và status là OPEN
   const canAccept = (
-    isAdmin || 
-    isLeaderForRequest || 
-    isTeamMember
-  ) && 
-  !isAccepted && 
+    isAdmin ||
+    isLeaderForRequest ||
+    isAssigneeForRequest
+  ) &&
+  !isRequesterForRequest && // Loại trừ người tạo request
+  !isAccepted &&
   request.status === "OPEN";
   
   // Permission: Admin can approve any request at any step
