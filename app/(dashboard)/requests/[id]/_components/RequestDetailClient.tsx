@@ -116,16 +116,16 @@ export function RequestDetailClient({
   ) || [];
   const hasMyTodoTasks = myTodoTasks.length > 0;
 
-  // Permission: Ai có thể tiếp nhận?
+  // Permission: Ai có thể tiếp nhận YÊU CẦU?
   // - Admin: luôn có quyền
   // - Leader của team được giao
-  // - Người được giao task trong request này (assignee)
+  // - Team member của team được giao (cho phép tiếp nhận yêu cầu cùng phòng ban)
   // - KHÔNG PHẢI người tạo request (họ là người yêu cầu, không có quyền tiếp nhận)
   // - Chỉ khi chưa tiếp nhận và status là OPEN
   const canAccept = (
     isAdmin ||
     isLeaderForRequest ||
-    isAssigneeForRequest
+    isTeamMember // Team members cũng có thể tiếp nhận (đặc biệt cho yêu cầu cùng phòng ban)
   ) &&
   !isRequesterForRequest && // Loại trừ người tạo request
   !isAccepted &&

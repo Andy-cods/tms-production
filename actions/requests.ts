@@ -225,8 +225,10 @@ export async function createRequestAction(formData: FormData) {
       },
     });
 
-    // === NOTIFY TARGET TEAM: Leader và Members của team được giao ===
+    // === NOTIFY TARGET TEAM based on same/different department ===
     if (req.teamId) {
+      const isSameDepartment = me.teamId && me.teamId === req.teamId;
+
       // Get team with leader and members
       const targetTeam = await tx.team.findUnique({
         where: { id: req.teamId },
@@ -242,38 +244,42 @@ export async function createRequestAction(formData: FormData) {
           select: { id: true },
         });
 
-        // Notify team leader (if exists and not the creator)
-        if (teamLeader && teamLeader.id !== me.id) {
-          await tx.notification.create({
-            data: {
-              userId: teamLeader.id,
-              type: "REQUEST_CREATED" as any,
-              title: "📥 Yêu cầu mới cần xử lý",
-              message: `"${req.title}" từ ${me.name || "người dùng"} - Vui lòng tiếp nhận và phân công.`,
-              requestId: req.id,
-              link: `/requests/${req.id}`,
-              priority: req.priority === "URGENT" ? "URGENT" : "INFO",
-            },
-          });
-        }
+        if (isSameDepartment) {
+          // === CÙNG PHÒNG BAN: Notify TẤT CẢ team members (KHÔNG notify Leader) ===
+          // Members có thể tự "Tiếp nhận" mà không cần Leader duyệt
+          const membersToNotify = targetTeam.members.filter(
+            (m) => m.id !== me.id // Không notify chính người tạo
+          );
 
-        // Notify all team members (except creator and leader)
-        const membersToNotify = targetTeam.members.filter(
-          (m) => m.id !== me.id && m.id !== teamLeader?.id
-        );
-
-        if (membersToNotify.length > 0) {
-          await tx.notification.createMany({
-            data: membersToNotify.map((member) => ({
-              userId: member.id,
-              type: "REQUEST_CREATED" as any,
-              title: "📥 Yêu cầu mới cho phòng ban",
-              message: `"${req.title}" từ ${me.name || "người dùng"} đã được gửi đến phòng ban của bạn.`,
-              requestId: req.id,
-              link: `/requests/${req.id}`,
-              priority: "INFO" as any,
-            })),
-          });
+          if (membersToNotify.length > 0) {
+            await tx.notification.createMany({
+              data: membersToNotify.map((member) => ({
+                userId: member.id,
+                type: "REQUEST_CREATED" as any,
+                title: "📥 Yêu cầu mới từ đồng nghiệp",
+                message: `"${req.title}" từ ${me.name || "đồng nghiệp"} - Bạn có thể tiếp nhận nếu phù hợp.`,
+                requestId: req.id,
+                link: `/requests/${req.id}`,
+                priority: req.priority === "URGENT" ? "URGENT" : "INFO",
+              })),
+            });
+          }
+        } else {
+          // === KHÁC PHÒNG BAN: Notify CHỈ Leader của team đích ===
+          // Leader sẽ tiếp nhận và phân công
+          if (teamLeader && teamLeader.id !== me.id) {
+            await tx.notification.create({
+              data: {
+                userId: teamLeader.id,
+                type: "REQUEST_CREATED" as any,
+                title: "📥 Yêu cầu mới cần xử lý",
+                message: `"${req.title}" từ ${me.name || "người dùng"} (phòng ban khác) - Vui lòng tiếp nhận và phân công.`,
+                requestId: req.id,
+                link: `/requests/${req.id}`,
+                priority: req.priority === "URGENT" ? "URGENT" : "INFO",
+              },
+            });
+          }
         }
       }
     }
@@ -331,48 +337,17 @@ export async function createRequestAction(formData: FormData) {
     Logger.warn("Failed to send Telegram for request create", { action: "createRequest", requestId: created.id, error: (e as any)?.message });
   }
 
-  // === SAME-DEPARTMENT BYPASS: Auto-accept if creator and request are in same department ===
-  // When request is sent within the same department, skip leader approval step
+  // === SAME-DEPARTMENT: KHÔNG auto-accept ===
+  // Yêu cầu cùng phòng ban vẫn cần được team member tiếp nhận thủ công
+  // Điều này đảm bảo ai đó chịu trách nhiệm xử lý yêu cầu
   const isSameDepartment = me.teamId && input.teamId && me.teamId === input.teamId;
-
   if (isSameDepartment) {
-    try {
-      await prisma.request.update({
-        where: { id: created.id },
-        data: {
-          acceptedAt: new Date(),
-          acceptedBy: me.id,
-        } as any,
-      });
-
-      await prisma.auditLog.create({
-        data: {
-          userId: me.id,
-          action: "AUTO_ACCEPTED_SAME_DEPT",
-          entity: "Request",
-          entityId: created.id,
-          newValue: {
-            reason: "Yêu cầu cùng phòng ban - tự động chấp nhận",
-            creatorTeamId: me.teamId,
-            requestTeamId: input.teamId,
-          },
-          requestId: created.id,
-        },
-      });
-
-      Logger.info("Request auto-accepted (same department)", {
-        action: "createRequest",
-        requestId: created.id,
-        creatorTeamId: me.teamId,
-        requestTeamId: input.teamId,
-      });
-    } catch (autoAcceptError) {
-      Logger.warn("Failed to auto-accept same-department request", {
-        action: "createRequest",
-        requestId: created.id,
-        error: autoAcceptError instanceof Error ? autoAcceptError.message : 'Unknown error',
-      });
-    }
+    Logger.info("Same-department request created - awaiting manual acceptance", {
+      action: "createRequest",
+      requestId: created.id,
+      creatorTeamId: me.teamId,
+      requestTeamId: input.teamId,
+    });
   }
 
   // Calculate and set SLA deadline for the request
