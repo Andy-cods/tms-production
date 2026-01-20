@@ -249,14 +249,17 @@ export function SubmitDeliverablesDialog({
               Link sản phẩm (tùy chọn)
             </Label>
             <Input
-              type="url"
-              placeholder="https://example.com/product"
+              type="text"
+              placeholder="https://drive.google.com/... hoặc bất kỳ URL hợp lệ"
               value={productLink}
               onChange={(e) => setProductLink(e.target.value)}
               className={!isLinkValid ? "border-red-500" : ""}
             />
+            <p className="text-xs text-gray-500">
+              Hỗ trợ: Google Drive, OneDrive, Dropbox, hoặc bất kỳ URL hợp lệ
+            </p>
             {hasLink && !isLinkValid && (
-              <p className="text-xs text-red-600">Link không hợp lệ</p>
+              <p className="text-xs text-red-600">Link không hợp lệ. URL phải bắt đầu bằng http:// hoặc https://</p>
             )}
           </div>
 

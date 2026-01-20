@@ -121,18 +121,18 @@ export function SubmitProductLinkDialog({ taskId, isResubmission = false, reject
           <div>
             <Label>Link sản phẩm *</Label>
             <Input
-              type="url"
-              placeholder="https://example.com/product"
+              type="text"
+              placeholder="https://drive.google.com/... hoặc https://dropbox.com/..."
               value={productLink}
               onChange={(e) => setProductLink(e.target.value)}
               className="mt-2"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Nhập URL đầy đủ của sản phẩm (ví dụ: https://example.com)
+              Hỗ trợ: Google Drive, OneDrive, Dropbox, Box, hoặc bất kỳ URL hợp lệ nào
             </p>
             {productLink && !isValidUrl(productLink.trim()) && (
               <p className="text-xs text-red-500 mt-1">
-                URL không hợp lệ. Vui lòng nhập URL đầy đủ với http:// hoặc https://
+                URL không hợp lệ. Vui lòng nhập URL đầy đủ (bắt đầu bằng http:// hoặc https://)
               </p>
             )}
           </div>

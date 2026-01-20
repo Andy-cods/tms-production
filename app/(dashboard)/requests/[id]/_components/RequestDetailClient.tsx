@@ -139,11 +139,16 @@ export function RequestDetailClient({
   const canRequesterApprove = isRequesterForRequest && 
                                request.status === "IN_REVIEW";
   
+  // Permission: Ai có thể "Gửi lại để review"?
+  // - Admin, Leader của team được giao, hoặc người được giao task (assignee)
+  // - KHÔNG PHẢI người tạo request (họ là người yêu cầu, không có quyền reject)
   const canReject = (
-    (userRole === "ADMIN") || 
-    (userRole === "LEADER" && isLeaderForRequest)
-  ) && 
-  request.status !== "DONE" && 
+    (userRole === "ADMIN") ||
+    (userRole === "LEADER" && isLeaderForRequest) ||
+    isAssigneeForRequest
+  ) &&
+  !isRequesterForRequest && // Loại trừ người tạo request
+  request.status !== "DONE" &&
   request.status !== "ARCHIVED" &&
   request.status !== "CLARIFICATION";
 

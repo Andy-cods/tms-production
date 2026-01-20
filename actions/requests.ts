@@ -225,6 +225,59 @@ export async function createRequestAction(formData: FormData) {
       },
     });
 
+    // === NOTIFY TARGET TEAM: Leader và Members của team được giao ===
+    if (req.teamId) {
+      // Get team with leader and members
+      const targetTeam = await tx.team.findUnique({
+        where: { id: req.teamId },
+        include: {
+          members: { select: { id: true, name: true } },
+        },
+      });
+
+      if (targetTeam) {
+        // Get leader of the team
+        const teamLeader = await tx.user.findFirst({
+          where: { teamId: req.teamId, role: "LEADER" as any },
+          select: { id: true },
+        });
+
+        // Notify team leader (if exists and not the creator)
+        if (teamLeader && teamLeader.id !== me.id) {
+          await tx.notification.create({
+            data: {
+              userId: teamLeader.id,
+              type: "REQUEST_CREATED" as any,
+              title: "📥 Yêu cầu mới cần xử lý",
+              message: `"${req.title}" từ ${me.name || "người dùng"} - Vui lòng tiếp nhận và phân công.`,
+              requestId: req.id,
+              link: `/requests/${req.id}`,
+              priority: req.priority === "URGENT" ? "URGENT" : "INFO",
+            },
+          });
+        }
+
+        // Notify all team members (except creator and leader)
+        const membersToNotify = targetTeam.members.filter(
+          (m) => m.id !== me.id && m.id !== teamLeader?.id
+        );
+
+        if (membersToNotify.length > 0) {
+          await tx.notification.createMany({
+            data: membersToNotify.map((member) => ({
+              userId: member.id,
+              type: "REQUEST_CREATED" as any,
+              title: "📥 Yêu cầu mới cho phòng ban",
+              message: `"${req.title}" từ ${me.name || "người dùng"} đã được gửi đến phòng ban của bạn.`,
+              requestId: req.id,
+              link: `/requests/${req.id}`,
+              priority: "INFO" as any,
+            })),
+          });
+        }
+      }
+    }
+
     return req;
   });
 

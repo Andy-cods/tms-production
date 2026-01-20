@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { AchievementsClient } from "./_components/AchievementsClient";
 import { computeAchievementMetrics } from "@/lib/services/achievements-service";
+import { recalculateUserStats } from "@/lib/services/user-stats-init";
 
 export const metadata = {
   title: "Thành tích | TMS",
@@ -15,12 +16,15 @@ export default async function AchievementsPage() {
     redirect("/login");
   }
 
+  const userId = (session.user as any).id;
+
+  // Ensure user stats are fresh before computing achievement metrics
+  await recalculateUserStats(userId);
+
   // Get all achievements (system-wide)
   const allAchievements = await prisma.achievement.findMany({
     orderBy: [{ category: "asc" }, { requirement: "asc" }],
   });
-
-  const userId = (session.user as any).id;
 
   // Get user's unlocked achievements
   const userAchievements = await prisma.userAchievement.findMany({
