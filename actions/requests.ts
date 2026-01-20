@@ -800,15 +800,21 @@ export async function acceptRequest(requestId: string) {
 }
 
 /**
- * Approve request - Duyệt yêu cầu (Bước 1: Leader duyệt)
+ * Approve request - Duyệt yêu cầu
  * Chỉ Leader của team được giao hoặc Admin mới được duyệt
- * 
- * Quy trình 3 bước:
+ *
+ * WORKFLOW:
  * 1. Tiếp nhận yêu cầu (acceptRequest) - bắt buộc
  * 2. Leader duyệt → IN_REVIEW (chờ người yêu cầu duyệt cuối)
  * 3. Người yêu cầu duyệt cuối → DONE (xem requesterApproveRequest)
- * 
- * Admin có thể duyệt thẳng → DONE ở bất kỳ bước nào (nhưng vẫn cần tiếp nhận trước)
+ *
+ * ADMIN BEHAVIOR (DIRECT APPROVAL):
+ * - Admin có thể duyệt thẳng → DONE (bỏ qua bước Requester confirm)
+ * - Vẫn yêu cầu request phải được tiếp nhận (acceptedAt) trước
+ * - completedAt được set khi approve → DONE
+ * - Notification được gửi cho Requester khi Admin approve
+ *
+ * Lý do Admin bypass: Admin có quyền cao nhất, chịu trách nhiệm cho quyết định
  */
 export async function approveRequest(requestId: string) {
   try {
@@ -865,12 +871,15 @@ export async function approveRequest(requestId: string) {
     // - Admin: Duyệt thẳng → DONE
     // - Leader: Chuyển → IN_REVIEW (chờ người yêu cầu duyệt cuối)
     const newStatus = userRole === Role.ADMIN ? "DONE" : "IN_REVIEW";
+    const now = new Date();
 
     // Update request status
     await prisma.request.update({
       where: { id: requestId },
       data: {
         status: newStatus,
+        // Set completedAt when Admin approves directly to DONE
+        ...(newStatus === "DONE" && { completedAt: now }),
       },
     });
 
@@ -899,17 +908,32 @@ export async function approveRequest(requestId: string) {
     });
 
     // Notification
-    if (userRole === Role.LEADER && request.creator) {
-      // Notify requester that leader has approved, waiting for final confirmation
-      await prisma.notification.create({
-        data: {
-          userId: request.creator.id,
-          type: "REVIEW_NEEDED",
-          title: "Yêu cầu đã được Leader duyệt",
-          message: `Leader đã duyệt yêu cầu "${request.title}". Vui lòng xác nhận hoàn thành cuối cùng.`,
-          requestId,
-        },
-      });
+    if (request.creator && request.creator.id !== userId) {
+      if (userRole === Role.ADMIN) {
+        // Notify requester that Admin has approved and completed
+        await prisma.notification.create({
+          data: {
+            userId: request.creator.id,
+            type: "COMPLETED",
+            title: "✅ Yêu cầu đã được Admin duyệt hoàn thành",
+            message: `Admin đã duyệt và hoàn thành yêu cầu "${request.title}".`,
+            requestId,
+            link: `/requests/${requestId}`,
+          },
+        });
+      } else {
+        // Notify requester that leader has approved, waiting for final confirmation
+        await prisma.notification.create({
+          data: {
+            userId: request.creator.id,
+            type: "REVIEW_NEEDED",
+            title: "Yêu cầu đã được Leader duyệt",
+            message: `Leader đã duyệt yêu cầu "${request.title}". Vui lòng xác nhận hoàn thành cuối cùng.`,
+            requestId,
+            link: `/requests/${requestId}`,
+          },
+        });
+      }
     }
 
     revalidatePath(`/requests/${requestId}`);
@@ -1054,9 +1078,14 @@ export async function rejectRequest(requestId: string, comment: string) {
     const request = await prisma.request.findUnique({
       where: { id: requestId },
       include: {
-        tasks: true,
+        tasks: {
+          select: { id: true, assigneeId: true },
+        },
         team: {
           select: { leaderId: true },
+        },
+        creator: {
+          select: { id: true, name: true },
         },
       },
     });
@@ -1110,6 +1139,46 @@ export async function rejectRequest(requestId: string, comment: string) {
         content: `❌ Yêu cầu bị từ chối và cần làm lại:\n\n${comment.trim()}\n\n---\nTừ chối bởi: ${(session.user as any).name || "Admin"}`,
       },
     });
+
+    // === NOTIFICATIONS ===
+    const notificationsToCreate: any[] = [];
+    const rejecterName = (session.user as any).name || "Admin/Leader";
+
+    // 1. Notify requester
+    if (request.creator && request.creator.id !== userId) {
+      notificationsToCreate.push({
+        userId: request.creator.id,
+        type: "REQUEST_REJECTED",
+        title: "❌ Yêu cầu bị từ chối",
+        message: `Yêu cầu "${request.title}" bị từ chối bởi ${rejecterName}. Lý do: ${comment.trim().substring(0, 100)}...`,
+        requestId,
+        link: `/requests/${requestId}`,
+        priority: "HIGH",
+      });
+    }
+
+    // 2. Notify all assignees
+    const assigneeIds = [...new Set(request.tasks.map(t => t.assigneeId).filter(Boolean))] as string[];
+    for (const assigneeId of assigneeIds) {
+      if (assigneeId !== userId) {
+        notificationsToCreate.push({
+          userId: assigneeId,
+          type: "TASK_REWORK",
+          title: "🔄 Công việc cần làm lại",
+          message: `Yêu cầu "${request.title}" bị từ chối. Vui lòng xem lại và làm lại công việc.`,
+          requestId,
+          link: `/requests/${requestId}`,
+          priority: "HIGH",
+        });
+      }
+    }
+
+    // Batch create notifications for performance
+    if (notificationsToCreate.length > 0) {
+      await prisma.notification.createMany({
+        data: notificationsToCreate,
+      });
+    }
 
     revalidatePath(`/requests/${requestId}`);
     revalidatePath("/requests");

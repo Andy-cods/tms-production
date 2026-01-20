@@ -256,6 +256,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             lockoutUntil: true,
             twoFactorEnabled: true,
             twoFactorSecret: true,
+            isActive: true,
           },
         });
 
@@ -281,6 +282,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             },
           });
           return null;
+        }
+
+        // === CHECK ACCOUNT STATUS: Block inactive/disabled users ===
+        if (user.isActive === false) {
+          await securityLogger.log({
+            type: SecurityEventType.AUTH_LOGIN_FAILURE,
+            severity: SecurityEventSeverity.MEDIUM,
+            userId: user.id,
+            userEmail: email,
+            ipAddress: ip,
+            outcome: "BLOCKED",
+            details: { reason: "Account is disabled" },
+          });
+          throw new Error("ACCOUNT_DISABLED");
         }
 
         const now = new Date();

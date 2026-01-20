@@ -171,17 +171,63 @@ export async function assignTaskAction(formData: FormData): Promise<void> {
 
 export async function assignTask(taskId: string, assigneeId: string) {
   const session = await auth();
-  
+
   if (!session?.user?.id) {
     throw new Error('Unauthorized');
   }
   const userId = session.user.id;
-  
+  const userRole = (session.user as any).role;
+
+  // === PERMISSION CHECK: Only Admin or Leader can assign tasks ===
+  if (userRole !== 'ADMIN' && userRole !== 'LEADER') {
+    throw new Error('Chỉ Admin hoặc Leader mới được phân công công việc');
+  }
+
+  // Get task with request and team info for validation
+  const existingTask = await prisma.task.findUnique({
+    where: { id: taskId },
+    include: {
+      request: {
+        select: {
+          id: true,
+          title: true,
+          teamId: true,
+          team: {
+            select: { leaderId: true, members: { select: { id: true } } },
+          },
+        },
+      },
+    },
+  });
+
+  if (!existingTask) {
+    throw new Error('Task không tồn tại');
+  }
+
+  // === LEADER CHECK: Can only assign tasks in their team ===
+  if (userRole === 'LEADER') {
+    const isLeaderOfTeam = existingTask.request?.team?.leaderId === userId;
+    if (!isLeaderOfTeam) {
+      throw new Error('Bạn chỉ có thể phân công công việc trong team của mình');
+    }
+  }
+
+  // === ASSIGNEE VALIDATION: Must be a team member ===
+  if (existingTask.request?.teamId) {
+    const teamMemberIds = existingTask.request.team?.members?.map(m => m.id) || [];
+    const leaderId = existingTask.request.team?.leaderId;
+    const validAssignees = [...teamMemberIds, leaderId].filter(Boolean);
+
+    if (!validAssignees.includes(assigneeId)) {
+      throw new Error('Người được giao phải là thành viên của team phụ trách yêu cầu này');
+    }
+  }
+
   const task = await prisma.task.update({
     where: { id: taskId },
     data: { assigneeId },
   });
-  
+
   // Create audit log
   await prisma.auditLog.create({
     data: {
@@ -193,10 +239,29 @@ export async function assignTask(taskId: string, assigneeId: string) {
       taskId: taskId,
     },
   });
-  
+
+  // === NOTIFY ASSIGNEE ===
+  if (assigneeId && assigneeId !== userId) {
+    const assignerName = (session.user as any).name || 'Admin/Leader';
+    await prisma.notification.create({
+      data: {
+        userId: assigneeId,
+        type: 'TASK_ASSIGNED',
+        title: '📋 Bạn được giao công việc mới',
+        message: `${assignerName} đã giao cho bạn công việc "${task.title}".`,
+        taskId: task.id,
+        requestId: existingTask.request?.id,
+        link: existingTask.request?.id ? `/requests/${existingTask.request.id}` : '/my-tasks',
+      },
+    });
+  }
+
   revalidatePath('/my-tasks');
   revalidatePath('/requests');
-  
+  if (existingTask.request?.id) {
+    revalidatePath(`/requests/${existingTask.request.id}`);
+  }
+
   return task;
 }
 
@@ -767,11 +832,19 @@ export async function submitProductLink(args: {
 
 /**
  * Approve product link - duyệt link sản phẩm
- * 
- * Workflow 2 bước:
+ *
+ * Workflow 2 bước (TWO-STEP APPROVAL):
  * 1. Leader duyệt → status = "LEADER_APPROVED" (chờ Requester duyệt)
  * 2. Requester duyệt → status = "APPROVED", task = DONE
- * 
+ *
+ * ADMIN BEHAVIOR:
+ * - Admin có thể thực hiện THAY thế Leader (bước 1) hoặc Requester (bước 2)
+ * - Admin vẫn phải thực hiện ĐỦ 2 bước, không thể skip trực tiếp sang DONE
+ * - Đây là design decision để đảm bảo accountability và audit trail
+ *
+ * SPECIAL CASE - Leader là Requester:
+ * - Nếu Leader cũng là người tạo request, chỉ cần 1 bước duyệt → DONE
+ *
  * Steps:
  * 1. Validate user can review (Leader/Requester/Admin)
  * 2. Validate productLinkReviewStatus
