@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  Trash2, 
-  FileText, 
-  User, 
-  Clock, 
+import {
+  Trash2,
+  FileText,
+  User,
+  Clock,
   Calendar,
   Flag,
   Tag,
@@ -17,7 +17,8 @@ import {
   RotateCcw,
   CheckSquare,
   Sparkles,
-  Settings
+  Settings,
+  PlayCircle
 } from "lucide-react";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { StatusBadge, PriorityBadge } from "@/components/ui/status-badge";
@@ -32,6 +33,7 @@ import { InfoField } from "@/components/requests/info-field";
 import { DeleteRequestModal } from "@/components/requests/delete-request-modal";
 import ArchiveButton from "./ArchiveButton";
 import { acceptRequest, approveRequest, rejectRequest, requesterApproveRequest } from "@/actions/requests";
+import { updateTaskStatus } from "@/actions/task";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -108,6 +110,12 @@ export function RequestDetailClient({
   const isAssigneeForRequest = request.tasks?.some((t: any) => t.assigneeId === userId) || false;
   const isAccepted = !!request.acceptedAt;
 
+  // Tasks được giao cho user hiện tại với status TODO (chưa bắt đầu)
+  const myTodoTasks = request.tasks?.filter((t: any) =>
+    t.assigneeId === userId && t.status === "TODO"
+  ) || [];
+  const hasMyTodoTasks = myTodoTasks.length > 0;
+
   // Permission: Ai có thể tiếp nhận?
   // - Admin: luôn có quyền
   // - Leader của team được giao
@@ -152,6 +160,15 @@ export function RequestDetailClient({
   request.status !== "ARCHIVED" &&
   request.status !== "CLARIFICATION";
 
+  // Permission: Assignee có thể "Bắt đầu công việc" khi:
+  // - Request đã được tiếp nhận (isAccepted)
+  // - User có task được giao với status TODO
+  // - Request chưa hoàn thành
+  const canStartWork = isAccepted &&
+    hasMyTodoTasks &&
+    request.status !== "DONE" &&
+    request.status !== "ARCHIVED";
+
   const handleAddTask = () => {
     console.log('Navigate to new task page');
     router.push(`/requests/${request.id}/tasks/new`);
@@ -173,6 +190,29 @@ export function RequestDetailClient({
       }
     } catch (error) {
       toast.error("Có lỗi xảy ra");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Bắt đầu làm việc - chuyển tất cả task TODO của user sang IN_PROGRESS
+  const handleStartWork = async () => {
+    if (myTodoTasks.length === 0) return;
+
+    setLoading(true);
+    try {
+      // Start all TODO tasks assigned to current user
+      for (const task of myTodoTasks) {
+        await updateTaskStatus(task.id, "IN_PROGRESS");
+      }
+      toast.success(
+        myTodoTasks.length === 1
+          ? "Đã bắt đầu công việc!"
+          : `Đã bắt đầu ${myTodoTasks.length} công việc!`
+      );
+      router.refresh();
+    } catch (error: any) {
+      toast.error(error?.message || "Có lỗi xảy ra");
     } finally {
       setLoading(false);
     }
@@ -312,9 +352,9 @@ export function RequestDetailClient({
           <div className="flex gap-2 flex-wrap">
             {/* Accept Request (Bước đầu tiên - bắt buộc) */}
             {canAccept && (
-              <Button 
-                variant="default" 
-                size="sm" 
+              <Button
+                variant="default"
+                size="sm"
                 onClick={handleAccept}
                 disabled={loading}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
@@ -323,7 +363,21 @@ export function RequestDetailClient({
                 Tiếp nhận
               </Button>
             )}
-            
+
+            {/* Start Work - Assignee bắt đầu làm việc sau khi được giao task */}
+            {canStartWork && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleStartWork}
+                disabled={loading}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              >
+                <PlayCircle className="w-4 h-4 mr-2" />
+                Bắt đầu công việc {myTodoTasks.length > 1 ? `(${myTodoTasks.length})` : ""}
+              </Button>
+            )}
+
             {/* Leader/Admin Approve (Step 1) - chỉ hiện sau khi đã tiếp nhận */}
             {canLeaderApprove && (
               <Button 
