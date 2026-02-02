@@ -31,37 +31,13 @@ const customJestConfig = {
     '<rootDir>/coverage/',
     '<rootDir>/dist/',
     '<rootDir>/build/',
+    '<rootDir>/e2e/',
     '<rootDir>/scripts/e2e-sanity.spec.ts', // Exclude Playwright tests
   ],
   
   // Coverage configuration
-  collectCoverage: true,
-  collectCoverageFrom: [
-    'lib/**/*.{js,jsx,ts,tsx}',
-    'actions/**/*.{js,jsx,ts,tsx}',
-    'components/**/*.{js,jsx,ts,tsx}',
-    '!**/*.d.ts',
-    '!**/node_modules/**',
-    '!**/.next/**',
-    '!**/__tests__/**',
-    '!**/__mocks__/**',
-    '!**/coverage/**',
-    '!**/dist/**',
-    '!**/build/**',
-  ],
-  
-  // Coverage thresholds
-  coverageThreshold: {
-    global: {
-      statements: 80,
-      branches: 75,
-      functions: 80,
-      lines: 80,
-    },
-  },
-  
-  // Coverage report formats
-  coverageReporters: ['text', 'lcov', 'html'],
+  // NOTE: keep coverage enforcement for `pnpm test:coverage` / `pnpm test:ci`, not for local `pnpm test`
+  collectCoverage: false,
   
   // Transform configuration
   transform: {

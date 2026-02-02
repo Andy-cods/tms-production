@@ -23,12 +23,16 @@ export function RequestConfirmStep({ data, onBack }: { data: any; onBack: () => 
           priority: data.priority,
           categoryId: data.categoryId,
           teamId: data.teamId,
+          suggestedAssigneeId: data.suggestedAssigneeId,
           deadline: data.deadlineTo || data.deadlineFrom,
           requesterType: data.requesterType,
           templateId: data.templateId,
         });
       } else {
-        result = await createRequest(data);
+        result = await createRequest({
+          ...data,
+          suggestedAssigneeId: data.suggestedAssigneeId,
+        });
       }
 
       if (result?.success) {

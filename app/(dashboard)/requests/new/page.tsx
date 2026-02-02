@@ -9,6 +9,12 @@ export default async function NewRequestPage() {
     redirect("/login");
   }
 
+  // Lấy thông tin user hiện tại để biết teamId
+  const currentUser = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { teamId: true },
+  });
+
   const [categories, teams] = await Promise.all([
     prisma.category.findMany({
       where: { isActive: true },
@@ -30,6 +36,7 @@ export default async function NewRequestPage() {
         teamId: c.teamId ?? undefined,
       }))}
       teams={teams}
+      currentUserTeamId={currentUser?.teamId}
     />
   );
 }

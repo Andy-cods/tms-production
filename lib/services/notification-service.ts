@@ -112,7 +112,7 @@ export const notificationService = {
       type: "TASK_ASSIGNED" as NotificationType,
       title: "Công việc mới",
       message: `Bạn được giao: ${taskTitle}`,
-      link: `/requests/${taskId}`,
+      link: `/my-tasks/${taskId}`,
       priority: "INFO" as NotificationPriority,
       metadata: { taskId },
     });

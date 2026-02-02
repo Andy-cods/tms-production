@@ -173,6 +173,7 @@ function getNotificationIcon(type: string): string {
     TASK_UPDATED: "✏️",
     TASK_COMPLETED: "✅",
     REQUEST_CREATED: "📝",
+    REQUEST_ACCEPTED: "📥",
     COMMENT_ADDED: "💬",
     MENTION: "👤",
     ESCALATION: "⚠️",

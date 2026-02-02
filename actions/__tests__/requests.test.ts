@@ -601,11 +601,12 @@ describe('actions/requests', () => {
       (mockAuthTyped as any).mockResolvedValue(mockSession);
       (prisma.request.findUnique as jest.Mock).mockResolvedValue(mockRequest);
       (prisma.task.count as jest.Mock).mockResolvedValue(0);
+      (prisma.attachment.findMany as jest.Mock).mockResolvedValue([]);
       (prisma.$transaction as jest.Mock).mockImplementation(async (callback: any) => {
         return callback({
           comment: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
           task: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-          attachment: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+          attachment: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
           notification: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
           auditLog: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }), create: jest.fn().mockResolvedValue({ id: 'log_123' }) },
           request: { delete: jest.fn().mockResolvedValue(mockRequest) },
@@ -648,11 +649,12 @@ describe('actions/requests', () => {
       (mockAuthTyped as any).mockResolvedValue(mockSession);
       (prisma.request.findUnique as jest.Mock).mockResolvedValue(mockRequest);
       (prisma.task.count as jest.Mock).mockResolvedValue(0);
+      (prisma.attachment.findMany as jest.Mock).mockResolvedValue([]);
       (prisma.$transaction as jest.Mock).mockImplementation(async (callback: any) => {
         return callback({
           comment: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
           task: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-          attachment: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+          attachment: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
           notification: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
           auditLog: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }), create: jest.fn().mockResolvedValue({ id: 'log_123' }) },
           request: { delete: jest.fn().mockResolvedValue(mockRequest) },

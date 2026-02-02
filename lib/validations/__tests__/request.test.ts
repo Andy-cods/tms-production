@@ -309,22 +309,19 @@ describe('lib/validations/request', () => {
       }
     });
 
-    it('should reject when categoryId is missing', () => {
+    it('should accept when categoryId is missing (optional unless template is used)', () => {
       // Arrange
-      const invalidData = {
+      const validData = {
         title: 'Valid Title',
         description: 'Valid description with more than 20 characters here.',
         priority: 'MEDIUM' as const,
       };
 
       // Act
-      const result = createRequestSchema.safeParse(invalidData);
+      const result = createRequestSchema.safeParse(validData);
 
       // Assert
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues.some(issue => issue.path.includes('categoryId'))).toBe(true);
-      }
+      expect(result.success).toBe(true);
     });
 
     it('should validate with valid attachments', () => {

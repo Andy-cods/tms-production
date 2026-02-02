@@ -50,6 +50,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ProductLinkReviewSection } from "@/components/tasks/product-link-review-section";
+import { AlertTriangle, ArrowRight, Eye } from "lucide-react";
 
 interface RequestDetailClientProps {
   request: any;
@@ -109,6 +110,8 @@ export function RequestDetailClient({
   const isTeamMember = request.team?.members?.some((m: any) => m.id === userId) || false;
   const isAssigneeForRequest = request.tasks?.some((t: any) => t.assigneeId === userId) || false;
   const isAccepted = !!request.acceptedAt;
+  const isSameDepartment = !!(request.creator?.teamId && request.teamId && request.creator.teamId === request.teamId);
+  const isAcceptedByMe = request.acceptedBy === userId;
 
   // Tasks được giao cho user hiện tại với status TODO (chưa bắt đầu)
   const myTodoTasks = request.tasks?.filter((t: any) =>
@@ -131,17 +134,20 @@ export function RequestDetailClient({
   !isAccepted &&
   request.status === "OPEN";
   
-  // Permission: Admin can approve any request at any step
-  // Leader can approve requests assigned to their team (Step 1: → IN_REVIEW)
+  // Permission: Ai có thể "duyệt/chuyển review" (Step 1: → IN_REVIEW)?
+  // - Admin: luôn được
+  // - Leader của team: được
+  // - Cùng phòng ban: người đã tiếp nhận (acceptedBy) được (bỏ qua Leader)
   // Nhưng phải đã tiếp nhận trước
   const canLeaderApprove = (
     (userRole === "ADMIN") || 
-    (userRole === "LEADER" && isLeaderForRequest)
+    (userRole === "LEADER" && isLeaderForRequest) ||
+    (isSameDepartment && isAcceptedByMe)
   ) && 
   isAccepted && // Phải đã tiếp nhận
   request.status !== "DONE" && 
   request.status !== "ARCHIVED" &&
-  request.status !== "IN_REVIEW"; // Leader không duyệt lại nếu đã IN_REVIEW
+  request.status !== "IN_REVIEW";
   
   // Requester can approve when status is IN_REVIEW (Step 2: → DONE)
   const canRequesterApprove = isRequesterForRequest && 
@@ -168,6 +174,38 @@ export function RequestDetailClient({
     hasMyTodoTasks &&
     request.status !== "DONE" &&
     request.status !== "ARCHIVED";
+
+  // === ACTION REQUIRED TRACKING FOR REQUESTER ===
+  // Tính toán các action Requester cần làm
+  const productLinksNeedingRequesterApproval = tasksForReview?.filter(
+    (task: any) => task.productLinkReviewStatus === "LEADER_APPROVED"
+  ) || [];
+
+  const hasProductLinksToApprove = productLinksNeedingRequesterApproval.length > 0;
+  const canFinalApprove = canRequesterApprove; // Request ở IN_REVIEW và user là Requester
+
+  // Build action required items for Requester
+  const requesterActions: { type: string; count: number; message: string; priority: 'high' | 'medium' }[] = [];
+
+  if (hasProductLinksToApprove) {
+    requesterActions.push({
+      type: 'product_link',
+      count: productLinksNeedingRequesterApproval.length,
+      message: `${productLinksNeedingRequesterApproval.length} link sản phẩm cần bạn duyệt`,
+      priority: 'high'
+    });
+  }
+
+  if (canFinalApprove) {
+    requesterActions.push({
+      type: 'final_approve',
+      count: 1,
+      message: 'Yêu cầu đã hoàn thành - cần xác nhận cuối cùng',
+      priority: 'high'
+    });
+  }
+
+  const showRequesterActionBanner = isRequesterForRequest && requesterActions.length > 0;
 
   const handleAddTask = () => {
     console.log('Navigate to new task page');
@@ -291,6 +329,68 @@ export function RequestDetailClient({
         ]}
       />
 
+      {/* ACTION REQUIRED BANNER FOR REQUESTER */}
+      {showRequesterActionBanner && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-400 rounded-xl p-5 shadow-md animate-pulse-subtle">
+          <div className="flex items-start gap-4">
+            <div className="flex-shrink-0">
+              <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center border-2 border-amber-300">
+                <AlertTriangle className="w-6 h-6 text-amber-600" />
+              </div>
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-bold text-amber-900 mb-2 flex items-center gap-2">
+                Cần hành động của bạn
+                <span className="text-sm font-normal bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full">
+                  {requesterActions.length} việc
+                </span>
+              </h3>
+              <div className="space-y-2">
+                {requesterActions.map((action, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-3 p-3 bg-white/70 rounded-lg border border-amber-200"
+                  >
+                    <div className={`w-2 h-2 rounded-full ${action.priority === 'high' ? 'bg-red-500' : 'bg-yellow-500'}`} />
+                    <span className="text-sm font-medium text-gray-800 flex-1">
+                      {action.message}
+                    </span>
+                    {action.type === 'product_link' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-amber-300 text-amber-700 hover:bg-amber-100"
+                        onClick={() => {
+                          // Scroll to product link section
+                          document.getElementById('product-links-section')?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                      >
+                        <Eye className="w-4 h-4 mr-1" />
+                        Xem
+                      </Button>
+                    )}
+                    {action.type === 'final_approve' && (
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                        onClick={handleRequesterApprove}
+                        disabled={loading}
+                      >
+                        <CheckCircle2 className="w-4 h-4 mr-1" />
+                        Xác nhận ngay
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-amber-700 mt-3">
+                Vui lòng hoàn thành các hành động trên để tiến trình yêu cầu được tiếp tục.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* IN_REVIEW Status Banner */}
       {request.status === "IN_REVIEW" && (
         <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
@@ -388,7 +488,11 @@ export function RequestDetailClient({
                 className="bg-green-600 hover:bg-green-700 text-white"
               >
                 <CheckCircle2 className="w-4 h-4 mr-2" />
-                {userRole === "ADMIN" ? "Duyệt" : "Duyệt (Leader)"}
+                {userRole === "ADMIN"
+                  ? "Duyệt"
+                  : isSameDepartment
+                  ? "Xác nhận xử lý"
+                  : "Duyệt (Leader)"}
               </Button>
             )}
             
@@ -449,7 +553,7 @@ export function RequestDetailClient({
           
           {/* Product Links Pending Review */}
           {tasksForReview && tasksForReview.length > 0 && (
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-yellow-200 border-l-4 border-l-yellow-500">
+            <div id="product-links-section" className="bg-white rounded-2xl p-6 shadow-sm border border-yellow-200 border-l-4 border-l-yellow-500">
               <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-4">
                 <span className="text-yellow-600">🔗</span>
                 Link sản phẩm cần duyệt ({tasksForReview.length})

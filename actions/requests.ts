@@ -18,6 +18,27 @@ import { differenceInHours } from "date-fns";
 import { fieldValidators } from "@/types/custom-fields";
 import { templateService } from "@/lib/services/template-service";
 import { getCatalogRule, computeFixedDeadline } from "@/lib/catalog";
+import { UTApi } from "uploadthing/server";
+
+// Lazy-init UTApi instance for file deletion
+let utapiInstance: UTApi | null = null;
+function getUtapi(): UTApi {
+  if (!utapiInstance) {
+    utapiInstance = new UTApi();
+  }
+  return utapiInstance;
+}
+
+/**
+ * Extract file key from Uploadthing URL
+ * Format: https://utfs.io/f/{fileKey} or https://*.uploadthing.com/f/{fileKey}
+ */
+function extractUploadthingKey(url: string): string | null {
+  if (!url) return null;
+  // Match utfs.io/f/{key} or uploadthing.com/f/{key}
+  const match = url.match(/(?:utfs\.io|uploadthing\.com)\/f\/([a-zA-Z0-9_-]+)/);
+  return match?.[1] ?? null;
+}
 
 // Import from types instead
 import { UserRole, normalizeRole } from "@/types";
@@ -490,7 +511,13 @@ export async function deleteRequest(requestId: string) {
     if (activeTasks > 0) {
       throw new Error('Không thể xóa yêu cầu có nhiệm vụ đang thực hiện');
     }
-    
+
+    // Collect attachment info BEFORE transaction (for Uploadthing cleanup after)
+    const attachmentsToDelete = await prisma.attachment.findMany({
+      where: { requestId },
+      select: { id: true, fileUrl: true, driveLink: true, externalUrl: true },
+    });
+
     try {
       // Use transaction to delete all related data
       await prisma.$transaction(async (tx) => {
@@ -498,18 +525,13 @@ export async function deleteRequest(requestId: string) {
         await tx.comment.deleteMany({
           where: { requestId },
         });
-        
+
         // Delete tasks
         await tx.task.deleteMany({
           where: { requestId },
         });
-        
-        // Delete attachments
-        // Note: You should also delete files from storage (Uploadthing/Cloudinary)
-        const attachments = await tx.attachment.findMany({
-          where: { requestId },
-        });
-        
+
+        // Delete attachments from database
         await tx.attachment.deleteMany({
           where: { requestId },
         });
@@ -548,34 +570,44 @@ export async function deleteRequest(requestId: string) {
           } as any,
         });
         
-        // Delete files from storage (best effort - don't block deletion)
-        for (const attachment of attachments) {
-          try {
-            // Skip Google Drive links (can't delete externally)
-            if (attachment.driveLink || attachment.fileUrl?.includes('drive.google.com')) {
-              Logger.info("Skipping Drive link deletion (external)", {
-                action: "deleteRequest",
-                attachmentId: attachment.id
-              });
-              continue;
-            }
-            // For uploadthing or other storage, attempt deletion
-            // Note: Implement specific storage deletion when storage provider is configured
-            Logger.info("File marked for deletion", {
-              action: "deleteRequest",
-              fileUrl: attachment.fileUrl,
-              attachmentId: attachment.id
-            });
-          } catch (fileError) {
-            Logger.warn("Failed to delete file from storage", {
-              action: "deleteRequest",
-              attachmentId: attachment.id,
-              error: (fileError as Error).message
-            });
-            // Continue with request deletion even if file deletion fails
-          }
-        }
       });
+
+      // Delete files from Uploadthing storage (outside transaction, best effort)
+      // Note: Files on Uploadthing free tier auto-delete after 30 days anyway
+      const uploadthingKeys: string[] = [];
+      for (const attachment of attachmentsToDelete) {
+        // Skip external links (Google Drive, external URLs)
+        if (attachment.driveLink || attachment.externalUrl) {
+          continue;
+        }
+        // Extract Uploadthing key from fileUrl
+        const fileKey = attachment.fileUrl ? extractUploadthingKey(attachment.fileUrl) : null;
+        if (fileKey) {
+          uploadthingKeys.push(fileKey);
+        }
+      }
+
+      // Batch delete from Uploadthing if there are keys
+      if (uploadthingKeys.length > 0) {
+        try {
+          const utapi = getUtapi();
+          const deleteResult = await utapi.deleteFiles(uploadthingKeys);
+          Logger.info("Files deleted from Uploadthing", {
+            action: "deleteRequest",
+            requestId,
+            keysDeleted: uploadthingKeys.length,
+            success: deleteResult.success
+          });
+        } catch (storageError) {
+          // Log warning but don't fail - files will auto-delete after 30 days
+          Logger.warn("Failed to delete files from Uploadthing", {
+            action: "deleteRequest",
+            requestId,
+            keys: uploadthingKeys,
+            error: (storageError as Error).message
+          });
+        }
+      }
       
       // Only revalidate /requests, not the deleted request detail page
       revalidatePath('/requests');
@@ -697,7 +729,7 @@ export async function acceptRequest(requestId: string) {
           select: { leaderId: true, name: true, members: { select: { id: true } } },
         },
         creator: {
-          select: { id: true, name: true },
+          select: { id: true, name: true, teamId: true },
         },
       },
     }) as any;
@@ -711,13 +743,23 @@ export async function acceptRequest(requestId: string) {
       return { success: false, error: "Yêu cầu đã được tiếp nhận rồi" };
     }
 
+    // Determine same/different department (creator vs target team)
+    const isSameDepartment = !!(request.creator?.teamId && request.teamId && request.creator.teamId === request.teamId);
+
     // Kiểm tra quyền: Admin, Leader của team được giao, hoặc member của team
     const isAdmin = userRole === Role.ADMIN;
     const isTeamLeader = request.team && request.team.leaderId === userId;
     const isTeamMember = request.team?.members.some((m: any) => m.id === userId) || false;
 
-    if (!isAdmin && !isTeamLeader && !isTeamMember) {
+    // If same department and a specific B is suggested, only allow B (and Admin) to accept
+    if (isSameDepartment && request.suggestedAssigneeId) {
+      if (!isAdmin && request.suggestedAssigneeId !== userId) {
+        return { success: false, error: "Yêu cầu này được gửi trực tiếp cho bạn được chỉ định. Bạn không có quyền tiếp nhận." };
+      }
+    } else {
+      if (!isAdmin && !isTeamLeader && !isTeamMember) {
       return { success: false, error: "Bạn không có quyền tiếp nhận yêu cầu này" };
+      }
     }
 
     // Update request - đánh dấu đã tiếp nhận
@@ -754,10 +796,11 @@ export async function acceptRequest(requestId: string) {
       await prisma.notification.create({
         data: {
           userId: request.creator.id,
-          type: "TASK_UPDATED" as any,
+          type: "REQUEST_ACCEPTED" as any,
           title: "Yêu cầu đã được tiếp nhận",
           message: `Yêu cầu "${request.title}" đã được tiếp nhận bởi ${(session.user as any).name || "Người dùng"}.`,
           requestId,
+          link: `/requests/${requestId}`,
         },
       });
     }
@@ -801,11 +844,6 @@ export async function approveRequest(requestId: string) {
     const userId = session.user.id as string;
     const userRole = (session.user as any).role as Role;
 
-    // RBAC: Chỉ Leader hoặc Admin
-    if (userRole !== Role.LEADER && userRole !== Role.ADMIN) {
-      return { success: false, error: "Chỉ Leader hoặc Admin mới được duyệt yêu cầu" };
-    }
-
     const request = await prisma.request.findUnique({
       where: { id: requestId },
       include: {
@@ -816,7 +854,7 @@ export async function approveRequest(requestId: string) {
           select: { leaderId: true, name: true },
         },
         creator: {
-          select: { id: true, name: true },
+          select: { id: true, name: true, teamId: true },
         },
       },
     }) as any;
@@ -828,6 +866,25 @@ export async function approveRequest(requestId: string) {
     // Kiểm tra đã tiếp nhận chưa (bắt buộc phải tiếp nhận trước khi duyệt)
     if (!request.acceptedAt) {
       return { success: false, error: "Yêu cầu phải được tiếp nhận trước khi duyệt" };
+    }
+
+    const isSameDepartment = !!(request.creator?.teamId && request.teamId && request.creator.teamId === request.teamId);
+
+    // RBAC:
+    // - Admin: luôn được duyệt
+    // - Leader: duyệt request của team mình
+    // - Same-department: người đã tiếp nhận (acceptedBy) được "duyệt/chuyển review" (bỏ qua Leader)
+    const isAdmin = userRole === Role.ADMIN;
+    const isLeader = userRole === Role.LEADER;
+    const isLeaderForTeam = isLeader && request.team && request.team.leaderId === userId;
+    const isAcceptedByMe = request.acceptedBy === userId;
+    const canApprove =
+      isAdmin ||
+      isLeaderForTeam ||
+      (isSameDepartment && isAcceptedByMe);
+
+    if (!canApprove) {
+      return { success: false, error: "Bạn không có quyền duyệt yêu cầu này" };
     }
 
     // Additional RBAC check: Leader can only approve requests of their team
@@ -844,8 +901,8 @@ export async function approveRequest(requestId: string) {
 
     // Quyết định status tiếp theo
     // - Admin: Duyệt thẳng → DONE
-    // - Leader: Chuyển → IN_REVIEW (chờ người yêu cầu duyệt cuối)
-    const newStatus = userRole === Role.ADMIN ? "DONE" : "IN_REVIEW";
+    // - Leader hoặc Same-department (acceptedBy): Chuyển → IN_REVIEW (chờ người yêu cầu duyệt cuối)
+    const newStatus = isAdmin ? "DONE" : "IN_REVIEW";
     const now = new Date();
 
     // Update request status
@@ -870,8 +927,10 @@ export async function approveRequest(requestId: string) {
     });
 
     // Create comment
-    const commentContent = userRole === Role.ADMIN 
+    const commentContent = isAdmin
       ? `✅ Yêu cầu đã được duyệt bởi Admin ${(session.user as any).name || "Admin"}`
+      : isSameDepartment
+      ? `✅ Yêu cầu đã được xác nhận bởi ${(session.user as any).name || "người xử lý"}. Chờ người yêu cầu xác nhận cuối cùng.`
       : `✅ Leader ${(session.user as any).name || "Leader"} (${request.team?.name}) đã duyệt yêu cầu. Chờ người yêu cầu xác nhận cuối cùng.`;
 
     await prisma.comment.create({
@@ -884,7 +943,7 @@ export async function approveRequest(requestId: string) {
 
     // Notification
     if (request.creator && request.creator.id !== userId) {
-      if (userRole === Role.ADMIN) {
+      if (isAdmin) {
         // Notify requester that Admin has approved and completed
         await prisma.notification.create({
           data: {
@@ -902,8 +961,10 @@ export async function approveRequest(requestId: string) {
           data: {
             userId: request.creator.id,
             type: "REVIEW_NEEDED",
-            title: "Yêu cầu đã được Leader duyệt",
-            message: `Leader đã duyệt yêu cầu "${request.title}". Vui lòng xác nhận hoàn thành cuối cùng.`,
+            title: isSameDepartment ? "Yêu cầu đã được xử lý xác nhận" : "Yêu cầu đã được Leader duyệt",
+            message: isSameDepartment
+              ? `Yêu cầu "${request.title}" đã được xác nhận bởi người xử lý. Vui lòng xác nhận hoàn thành cuối cùng.`
+              : `Leader đã duyệt yêu cầu "${request.title}". Vui lòng xác nhận hoàn thành cuối cùng.`,
             requestId,
             link: `/requests/${requestId}`,
           },
@@ -1123,7 +1184,7 @@ export async function rejectRequest(requestId: string, comment: string) {
     if (request.creator && request.creator.id !== userId) {
       notificationsToCreate.push({
         userId: request.creator.id,
-        type: "REQUEST_REJECTED",
+        type: "CLARIFICATION_NEEDED",
         title: "❌ Yêu cầu bị từ chối",
         message: `Yêu cầu "${request.title}" bị từ chối bởi ${rejecterName}. Lý do: ${comment.trim().substring(0, 100)}...`,
         requestId,
@@ -1327,6 +1388,7 @@ export async function createRequestWithTemplate(data: {
   priority: string;
   categoryId: string;
   teamId?: string;
+  suggestedAssigneeId?: string;
   deadline?: string;
   requesterType?: string;
   attachments?: Array<{ fileName: string; fileUrl: string }>;
@@ -1406,6 +1468,7 @@ export async function createRequestWithTemplate(data: {
         deadline: data.deadline ? new Date(data.deadline) : null,
         requesterType: (data.requesterType || "INTERNAL") as any,
         createdFromTemplateId: data.templateId || null,
+        suggestedAssigneeId: data.suggestedAssigneeId || null,
       } as any,
     });
 
@@ -1453,6 +1516,47 @@ export async function createRequestWithTemplate(data: {
         } as unknown) as Prisma.InputJsonValue,
       },
     });
+
+    // === NOTIFY TARGET: CHỈ người được chỉ định hoặc Leader (nếu khác phòng ban) ===
+    if (request.teamId) {
+      const isSameDepartment = me.teamId && me.teamId === request.teamId;
+
+      // Nếu có người được chỉ định cụ thể (suggestedAssigneeId) → CHỈ notify người đó
+      if (data.suggestedAssigneeId && data.suggestedAssigneeId !== me.id) {
+        await prisma.notification.create({
+          data: {
+            userId: data.suggestedAssigneeId,
+            type: "REQUEST_CREATED" as any,
+            title: "📥 Yêu cầu mới gửi trực tiếp cho bạn",
+            message: `"${request.title}" từ ${me.name || "đồng nghiệp"} - Vui lòng xem xét và tiếp nhận.`,
+            requestId: request.id,
+            link: `/requests/${request.id}`,
+            priority: request.priority === "URGENT" ? "URGENT" : "INFO",
+          },
+        });
+      } else if (!isSameDepartment) {
+        // Khác phòng ban VÀ không có người chỉ định → notify Leader
+        const teamLeader = await prisma.user.findFirst({
+          where: { teamId: request.teamId, role: "LEADER" as any },
+          select: { id: true },
+        });
+
+        if (teamLeader?.id && teamLeader.id !== me.id) {
+          await prisma.notification.create({
+            data: {
+              userId: teamLeader.id,
+              type: "REQUEST_CREATED" as any,
+              title: "📥 Yêu cầu mới cần tiếp nhận",
+              message: `"${request.title}" từ ${me.name || "người dùng"} (phòng ban khác) - Vui lòng tiếp nhận và phân công.`,
+              requestId: request.id,
+              link: `/requests/${request.id}`,
+              priority: request.priority === "URGENT" ? "URGENT" : "INFO",
+            },
+          });
+        }
+      }
+      // Cùng phòng ban KHÔNG có người chỉ định → không notify ai (trường hợp này không nên xảy ra vì form bắt buộc chọn)
+    }
 
     revalidatePath("/requests");
 
@@ -1514,7 +1618,8 @@ export async function createRequest(data: any) {
       return { success: false, error: "Chưa đăng nhập" };
     }
 
-    const userId = (session.user as any).id as string;
+    const me = await ensureDbUserFromSession();
+    const userId = me.id;
 
     // Determine teamId
     let teamId: string | null | undefined = data.teamId;
@@ -1534,6 +1639,7 @@ export async function createRequest(data: any) {
         creatorId: userId,
         requesterType: data.requesterType,
         deadline: data.deadlineTo ? new Date(data.deadlineTo) : null,
+        suggestedAssigneeId: data.suggestedAssigneeId || null,
       } as any,
     });
 
@@ -1546,6 +1652,47 @@ export async function createRequest(data: any) {
         newValue: ({ title: request.title } as unknown) as import("@prisma/client").Prisma.InputJsonValue,
       },
     });
+
+    // === NOTIFY TARGET: CHỈ người được chỉ định hoặc Leader (nếu khác phòng ban) ===
+    if (request.teamId) {
+      const isSameDepartment = me.teamId && me.teamId === request.teamId;
+
+      // Nếu có người được chỉ định cụ thể (suggestedAssigneeId) → CHỈ notify người đó
+      if (data.suggestedAssigneeId && data.suggestedAssigneeId !== me.id) {
+        await prisma.notification.create({
+          data: {
+            userId: data.suggestedAssigneeId,
+            type: "REQUEST_CREATED" as any,
+            title: "📥 Yêu cầu mới gửi trực tiếp cho bạn",
+            message: `"${request.title}" từ ${me.name || "đồng nghiệp"} - Vui lòng xem xét và tiếp nhận.`,
+            requestId: request.id,
+            link: `/requests/${request.id}`,
+            priority: request.priority === "URGENT" ? "URGENT" : "INFO",
+          },
+        });
+      } else if (!isSameDepartment) {
+        // Khác phòng ban VÀ không có người chỉ định → notify Leader
+        const teamLeader = await prisma.user.findFirst({
+          where: { teamId: request.teamId, role: "LEADER" as any },
+          select: { id: true },
+        });
+
+        if (teamLeader?.id && teamLeader.id !== me.id) {
+          await prisma.notification.create({
+            data: {
+              userId: teamLeader.id,
+              type: "REQUEST_CREATED" as any,
+              title: "📥 Yêu cầu mới cần tiếp nhận",
+              message: `"${request.title}" từ ${me.name || "người dùng"} (phòng ban khác) - Vui lòng tiếp nhận và phân công.`,
+              requestId: request.id,
+              link: `/requests/${request.id}`,
+              priority: request.priority === "URGENT" ? "URGENT" : "INFO",
+            },
+          });
+        }
+      }
+      // Cùng phòng ban KHÔNG có người chỉ định → không notify ai (trường hợp này không nên xảy ra)
+    }
 
     return { success: true, requestId: request.id };
   } catch (error) {

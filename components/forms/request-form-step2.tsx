@@ -51,12 +51,14 @@ export function RequestFormStep2({
   requestType,
   categories,
   teams,
+  currentUserTeamId,
   onNext,
   onBack,
 }: {
   requestType: "catalog" | "custom";
   categories: Category[];
   teams: Team[];
+  currentUserTeamId?: string | null;
   onNext: (data: any) => void;
   onBack: () => void;
 }) {
@@ -67,11 +69,27 @@ export function RequestFormStep2({
   >([]);
   const [teamMembers, setTeamMembers] = useState<Array<{ id: string; name: string; email: string; role: string }>>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
-  const selectedTeam = requestType === "catalog" 
+  const [sameDeptError, setSameDeptError] = useState<string | null>(null);
+  const selectedTeam = requestType === "catalog"
     ? (form.watch("teamId" as any) as string | undefined)
     : (form.watch("teamId" as any) as string | undefined);
   const selectedCategory = requestType === "catalog" ? (form.watch("categoryId" as any) as string | undefined) : undefined;
   const selectedTemplate = requestType === "catalog" ? (form.watch("templateId" as any) as string | undefined) : undefined;
+  const selectedAssignee = form.watch("suggestedAssigneeId" as any) as string | undefined;
+
+  // Xác định cùng phòng ban
+  const isSameDepartment = !!(currentUserTeamId && selectedTeam && currentUserTeamId === selectedTeam);
+
+  // Custom submit handler với validation cùng phòng ban
+  const handleFormSubmit = (data: any) => {
+    // Validation: cùng phòng ban PHẢI chọn người xử lý
+    if (isSameDepartment && !data.suggestedAssigneeId) {
+      setSameDeptError("Yêu cầu cùng phòng ban - bắt buộc chọn người xử lý cụ thể");
+      return;
+    }
+    setSameDeptError(null);
+    onNext(data);
+  };
   // Filter categories: chỉ hiển thị categories của team đã chọn (teamId === selectedTeam)
   // Không hiển thị global categories (categories không có teamId)
   const filteredCategories =
@@ -163,7 +181,7 @@ export function RequestFormStep2({
   }, [form, requestType]);
 
   return (
-    <form onSubmit={form.handleSubmit(onNext)} className="space-y-6">
+    <form onSubmit={form.handleSubmit(handleFormSubmit)} className="space-y-6">
       <Card className="p-6">
         <h2 className="text-2xl font-bold mb-6">
           {requestType === "catalog" ? "Yêu cầu theo Catalog" : "Yêu cầu Tùy chỉnh"}
@@ -292,23 +310,28 @@ export function RequestFormStep2({
                 </div>
               </div>
 
-              {/* Gợi ý nhân viên xử lý - chỉ hiển thị khi đã chọn phòng ban và phân loại */}
+              {/* Chọn người xử lý - BẮT BUỘC khi cùng phòng ban */}
               {selectedTeam && selectedCategory && (
-                <div>
-                  <Label>
+                <div className={isSameDepartment ? "p-4 border-2 border-amber-300 rounded-lg bg-amber-50" : ""}>
+                  {isSameDepartment && (
+                    <div className="mb-3 p-2 bg-amber-100 rounded text-amber-800 text-sm">
+                      ⚠️ <strong>Yêu cầu cùng phòng ban</strong> - Bạn phải chọn người xử lý cụ thể
+                    </div>
+                  )}
+                  <Label className={isSameDepartment ? "text-amber-900 font-semibold" : ""}>
                     <User className="w-4 h-4 inline mr-1" />
-                    Gợi ý nhân viên xử lý (optional)
+                    Người xử lý {isSameDepartment ? "*" : "(tuỳ chọn)"}
                   </Label>
                   {loadingMembers ? (
-                    <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border">
+                    <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border mt-1">
                       <Loader2 className="w-4 h-4 animate-spin text-primary-600" />
                       <span className="text-sm text-gray-600">Đang tải danh sách nhân viên...</span>
                     </div>
                   ) : teamMembers.length > 0 ? (
                     <Select
-                      value={form.watch("suggestedAssigneeId" as any) || undefined}
+                      value={selectedAssignee || undefined}
                       onValueChange={(val: string) => {
-                        // Nếu chọn "none" thì clear, không thì set giá trị
+                        setSameDeptError(null);
                         if (val === "none") {
                           form.setValue("suggestedAssigneeId" as any, undefined);
                         } else {
@@ -316,11 +339,11 @@ export function RequestFormStep2({
                         }
                       }}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Chọn nhân viên (tùy chọn)" />
+                      <SelectTrigger className={sameDeptError ? "border-red-500" : ""}>
+                        <SelectValue placeholder={isSameDepartment ? "Chọn người xử lý (bắt buộc)" : "Chọn nhân viên (tuỳ chọn)"} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">Không chọn</SelectItem>
+                        {!isSameDepartment && <SelectItem value="none">Để Leader phân công</SelectItem>}
                         {teamMembers.map((member) => (
                           <SelectItem key={member.id} value={member.id}>
                             {member.name} ({member.email})
@@ -329,13 +352,18 @@ export function RequestFormStep2({
                       </SelectContent>
                     </Select>
                   ) : (
-                    <div className="p-3 bg-gray-50 rounded-lg border text-sm text-gray-600">
+                    <div className="p-3 bg-gray-50 rounded-lg border text-sm text-gray-600 mt-1">
                       Phòng ban này chưa có nhân viên
                     </div>
                   )}
-                  <p className="text-xs text-gray-500 mt-1">
-                    💡 Gợi ý nhân viên phù hợp để xử lý yêu cầu này (không bắt buộc)
-                  </p>
+                  {sameDeptError && (
+                    <p className="text-sm text-red-600 mt-1">{sameDeptError}</p>
+                  )}
+                  {!isSameDepartment && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      💡 Gợi ý nhân viên phù hợp để xử lý yêu cầu này
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -367,23 +395,28 @@ export function RequestFormStep2({
                 </Select>
               </div>
 
-              {/* Gợi ý nhân viên xử lý - chỉ hiển thị khi đã chọn phòng ban */}
+              {/* Chọn người xử lý - BẮT BUỘC khi cùng phòng ban */}
               {selectedTeam && (
-                <div>
-                  <Label>
+                <div className={isSameDepartment ? "p-4 border-2 border-amber-300 rounded-lg bg-amber-50" : ""}>
+                  {isSameDepartment && (
+                    <div className="mb-3 p-2 bg-amber-100 rounded text-amber-800 text-sm">
+                      ⚠️ <strong>Yêu cầu cùng phòng ban</strong> - Bạn phải chọn người xử lý cụ thể
+                    </div>
+                  )}
+                  <Label className={isSameDepartment ? "text-amber-900 font-semibold" : ""}>
                     <User className="w-4 h-4 inline mr-1" />
-                    Gợi ý nhân viên xử lý (optional)
+                    Người xử lý {isSameDepartment ? "*" : "(tuỳ chọn)"}
                   </Label>
                   {loadingMembers ? (
-                    <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border">
+                    <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border mt-1">
                       <Loader2 className="w-4 h-4 animate-spin text-primary-600" />
                       <span className="text-sm text-gray-600">Đang tải danh sách nhân viên...</span>
                     </div>
                   ) : teamMembers.length > 0 ? (
                     <Select
-                      value={form.watch("suggestedAssigneeId" as any) || undefined}
+                      value={selectedAssignee || undefined}
                       onValueChange={(val: string) => {
-                        // Nếu chọn "none" thì clear, không thì set giá trị
+                        setSameDeptError(null);
                         if (val === "none") {
                           form.setValue("suggestedAssigneeId" as any, undefined);
                         } else {
@@ -391,11 +424,11 @@ export function RequestFormStep2({
                         }
                       }}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Chọn nhân viên (tùy chọn)" />
+                      <SelectTrigger className={sameDeptError ? "border-red-500" : ""}>
+                        <SelectValue placeholder={isSameDepartment ? "Chọn người xử lý (bắt buộc)" : "Chọn nhân viên (tuỳ chọn)"} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">Không chọn</SelectItem>
+                        {!isSameDepartment && <SelectItem value="none">Để Leader phân công</SelectItem>}
                         {teamMembers.map((member) => (
                           <SelectItem key={member.id} value={member.id}>
                             {member.name} ({member.email})
@@ -404,13 +437,18 @@ export function RequestFormStep2({
                       </SelectContent>
                     </Select>
                   ) : (
-                    <div className="p-3 bg-gray-50 rounded-lg border text-sm text-gray-600">
+                    <div className="p-3 bg-gray-50 rounded-lg border text-sm text-gray-600 mt-1">
                       Phòng ban này chưa có nhân viên
                     </div>
                   )}
-                  <p className="text-xs text-gray-500 mt-1">
-                    💡 Gợi ý nhân viên phù hợp để xử lý yêu cầu này (không bắt buộc)
-                  </p>
+                  {sameDeptError && (
+                    <p className="text-sm text-red-600 mt-1">{sameDeptError}</p>
+                  )}
+                  {!isSameDepartment && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      💡 Gợi ý nhân viên phù hợp để xử lý yêu cầu này
+                    </p>
+                  )}
                 </div>
               )}
 

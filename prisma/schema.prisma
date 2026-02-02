@@ -58,6 +58,7 @@ model User {
   notifications         Notification[]
   requestsCreated       Request[]            @relation("RequestCreator")
   requestsAccepted      Request[]            @relation("RequestAcceptedBy")
+  requestsSuggested     Request[]            @relation("RequestSuggestedAssignee")
   slaPauseLogs          SLAPauseLog[]
   createdTemplates      TaskTemplate[]
   tasksAssigned         Task[]               @relation("TaskAssignee")
@@ -140,6 +141,8 @@ model Request {
   acceptedAt        DateTime?
   acceptedBy        String?
   acceptedByUser    User?           @relation("RequestAcceptedBy", fields: [acceptedBy], references: [id])
+  suggestedAssigneeId String?
+  suggestedAssignee   User?         @relation("RequestSuggestedAssignee", fields: [suggestedAssigneeId], references: [id])
   attachments       Attachment[]
   auditLogs         AuditLog[]
   comments          Comment[]
@@ -154,6 +157,7 @@ model Request {
   @@index([creatorId])
   @@index([teamId])
   @@index([acceptedBy])
+  @@index([suggestedAssigneeId])
   @@map("requests")
 }
 
@@ -692,6 +696,7 @@ enum TaskStatus {
 
 enum NotificationType {
   REQUEST_CREATED
+  REQUEST_ACCEPTED
   TASK_ASSIGNED
   TASK_UPDATED
   REVIEW_NEEDED

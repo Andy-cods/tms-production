@@ -13,9 +13,11 @@ type Team = { id: string; name: string };
 export default function NewRequestWizard({
   categories,
   teams,
+  currentUserTeamId,
 }: {
   categories: Category[];
   teams: Team[];
+  currentUserTeamId?: string | null;
 }) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [requestType, setRequestType] = useState<"catalog" | "custom" | null>(null);
@@ -101,6 +103,7 @@ export default function NewRequestWizard({
             requestType={requestType}
             categories={categories}
             teams={teams}
+            currentUserTeamId={currentUserTeamId}
             onNext={(data: any) => {
               setFormData({ ...data, requestType });
               setStep(3);

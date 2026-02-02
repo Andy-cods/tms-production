@@ -21,7 +21,7 @@ export default async function RequestDetailPage(props: Props) {
       where: { id },
       include: {
         category: { select: { name: true } },
-        creator: { select: { name: true, email: true } },
+        creator: { select: { id: true, name: true, email: true, teamId: true } },
         team: { 
           select: { 
             name: true, 

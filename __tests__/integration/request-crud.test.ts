@@ -35,13 +35,16 @@ describe('Request CRUD Integration', () => {
 
   describe('createRequest', () => {
     it('creates request successfully with valid data', async () => {
+      // createRequestAction uses prisma.$transaction(tx => tx.request.create(...))
+      prismaMock.$transaction.mockImplementation(async (cb: any) => cb(prismaMock as any));
+
       const mockRequest = {
         id: 'req-1',
         title: 'Test Request',
         description: 'Test description that is long enough to meet validation requirements',
         priority: 'HIGH' as const,
         status: 'OPEN' as const,
-        categoryId: 'cat-1',
+        categoryId: '123e4567-e89b-12d3-a456-426614174000',
         creatorId: 'user-1',
         teamId: null,
         deadline: null,
@@ -63,6 +66,9 @@ describe('Request CRUD Integration', () => {
         id: 'user-1',
         email: 'test@example.com',
         name: 'Test User',
+        role: 'STAFF' as any,
+        teamId: null,
+        isActive: true,
       })
 
       // Mock category lookup
@@ -79,7 +85,7 @@ describe('Request CRUD Integration', () => {
       formData.append('title', 'Test Request')
       formData.append('description', 'Test description that is long enough to meet validation requirements')
       formData.append('priority', 'HIGH')
-      formData.append('categoryId', 'cat-1')
+      formData.append('categoryId', '123e4567-e89b-12d3-a456-426614174000')
 
       const result = await createRequestAction(formData)
 
@@ -89,12 +95,14 @@ describe('Request CRUD Integration', () => {
     })
 
     it('returns error for invalid title (too short)', async () => {
+      prismaMock.$transaction.mockImplementation(async (cb: any) => cb(prismaMock as any));
+
       // Create FormData with invalid title
       const formData = new FormData()
       formData.append('title', 'abc') // Too short (< 5 chars)
       formData.append('description', 'Test description that is long enough')
       formData.append('priority', 'HIGH')
-      formData.append('categoryId', 'cat-1')
+      formData.append('categoryId', '123e4567-e89b-12d3-a456-426614174000')
 
       const result = await createRequestAction(formData)
 
@@ -104,12 +112,14 @@ describe('Request CRUD Integration', () => {
     })
 
     it('returns error for invalid description (too short)', async () => {
+      prismaMock.$transaction.mockImplementation(async (cb: any) => cb(prismaMock as any));
+
       // Create FormData with invalid description
       const formData = new FormData()
       formData.append('title', 'Valid Title')
       formData.append('description', 'Short') // Too short (< 20 chars)
       formData.append('priority', 'HIGH')
-      formData.append('categoryId', 'cat-1')
+      formData.append('categoryId', '123e4567-e89b-12d3-a456-426614174000')
 
       const result = await createRequestAction(formData)
 

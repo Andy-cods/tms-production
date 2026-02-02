@@ -60,20 +60,22 @@ export async function findApplicableSlaConfig(
 
   for (const config of configs) {
     let score = 0;
+    const configPriority = (config as any).priority ?? null;
+    const configCategory = (config as any).category ?? null;
     
     // Priority match (2 points)
-    if (config.priority === priority) {
+    if (configPriority === priority) {
       score += 2;
-    } else if (config.priority === null) {
+    } else if (configPriority === null) {
       score += 1; // Generic priority
     } else {
       continue; // Skip if priority doesn't match and isn't generic
     }
 
     // Category match (1 point)
-    if (config.category === category) {
+    if (configCategory === category) {
       score += 1;
-    } else if (config.category === null) {
+    } else if (configCategory === null) {
       score += 0.5; // Generic category
     } else if (category) {
       continue; // Skip if category doesn't match and isn't generic

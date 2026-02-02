@@ -342,7 +342,7 @@ export async function createTaskForRequest(requestId: string, taskData: {
     if (taskData.assigneeId) {
       try {
         await notificationService.notifyTaskAssigned(
-          requestId,
+          task.id,
           taskData.assigneeId,
           task.title
         );
